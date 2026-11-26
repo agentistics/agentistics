@@ -8,12 +8,13 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Database } from 'bun:sqlite'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
 import { isBusyError, openJournal, withRecoveryRetry } from './journal'
-import type { PathProbe } from './schema'
+import { rowToEvent, toRow, type JournalRow } from './journal-plan'
+import { EVENTS_DDL, configureConnection, type PathProbe } from './schema'
 import { MAX_PAGE, type Journal } from './types'
 
 let root = ''
@@ -345,12 +346,18 @@ describe('crash recovery', () => {
       const db = new Database(${JSON.stringify(path)})
       db.exec('PRAGMA busy_timeout = 10000'); db.exec('PRAGMA journal_mode = WAL')
       db.exec('PRAGMA synchronous = NORMAL'); db.exec('PRAGMA wal_autocheckpoint = 0')
-      const ins = db.prepare("INSERT INTO events (event_id, schema, type, occurred_at, recorded_at, source_kind, source_id, mode, confidence, adapter_version, data) VALUES (?, 1, 'session.started', '2026-09-25T10:00:00.000Z', '2026-09-25T10:00:00.000Z', 'harness', 'claude', 'replayed', 'exact', 'claude@1', '{}')")
+      // The v2 row form (journal-plan.ts encodeRow): interned strings, epoch-ms instants.
+      const words = ['session.started', 'harness', 'claude', 'replayed', 'exact', 'claude@1']
+      for (const w of words) db.query('INSERT OR IGNORE INTO event_strings (s) VALUES (?)').run(w)
+      const id = w => db.query('SELECT id FROM event_strings WHERE s = ?').get(w).id
+      const at = Date.UTC(2026, 8, 25, 10, 0, 0)
+      const ins = db.prepare("INSERT INTO events (event_id, schema, type, occurred_at, recorded_at, source_kind, source_id, mode, confidence, adapter_version, data) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, '{}')")
+      const put = eid => ins.run(eid, id('session.started'), at, at, id('harness'), id('claude'), id('replayed'), id('exact'), id('claude@1'))
       if (${JSON.stringify(mode)} === 'commit') {
-        db.transaction(() => { for (let i = 0; i < ${n}; i++) ins.run(${JSON.stringify(prefix)} + i) })()
+        db.transaction(() => { for (let i = 0; i < ${n}; i++) put(${JSON.stringify(prefix)} + i) })()
       } else {
         db.exec('BEGIN IMMEDIATE')
-        for (let i = 0; i < ${n}; i++) ins.run(${JSON.stringify(prefix)} + i)
+        for (let i = 0; i < ${n}; i++) put(${JSON.stringify(prefix)} + i)
       }
       process.kill(process.pid, 'SIGKILL')
     `
@@ -438,5 +445,71 @@ describe('known limit: the FIRST row written for an event id wins', () => {
     const page = await j.readFrom(0, 10)
     expect((page.events[0]!.data as unknown as { title: string }).title).toBe('first')
     j.close()
+  })
+})
+
+describe('schema v1 -> v2 migration (A1.7)', () => {
+  const V1_COLS = [
+    'event_id', 'schema', 'type', 'occurred_at', 'recorded_at', 'session_id', 'run_id', 'agent_id', 'task_id',
+    'source_kind', 'source_id', 'source_version', 'mode', 'confidence', 'adapter_version', 'source_ref', 'data',
+  ] as const
+
+  /** A file exactly as a v1 build left it: v1 DDL, user_version 1, rows written by v1's `toRow`. */
+  function v1File(rows: JournalRow[], deleteFrom?: number): string {
+    const path = fresh('v1')
+    mkdirSync(dirname(path), { recursive: true })
+    const db = new Database(path, { create: true })
+    configureConnection(db)
+    for (const sql of EVENTS_DDL) db.exec(sql)
+    db.exec('PRAGMA user_version = 1')
+    const ins = db.prepare(`INSERT INTO events (${V1_COLS.join(', ')}) VALUES (${V1_COLS.map(() => '?').join(', ')})`)
+    for (const r of rows) ins.run(...V1_COLS.map(c => r[c]))
+    if (deleteFrom !== undefined) db.query('DELETE FROM events WHERE rowid >= ?').run(deleteFrom)
+    db.close()
+    return path
+  }
+
+  const hexId = (i: number) => i.toString(16).padStart(32, '0')
+  const sample = (): AgentisticsEvent[] => [
+    ev(hexId(1), 1, { runId: 'run_a', agentId: 'agt_a', provenance: { mode: 'replayed', confidence: 'exact', adapterVersion: '1.1.0', sourceRef: 'claude:conv:12' } }),
+    ev('not-hex', 2, { data: { provider: 'anthropic', usage: { input: 1, output: 2 } } as unknown as AgentisticsEvent['data'] }),
+    ev(hexId(3), 3, { taskId: 'task-9', data: 'a bare string' as unknown as AgentisticsEvent['data'] }),
+    ev(hexId(4), 4),
+    ev(hexId(5), 5),
+  ]
+
+  test('every row keeps its rowid and reads back identical; the cursor floor survives a deleted tail', async () => {
+    const events = sample()
+    // Rows 4 and 5 are deleted before the upgrade: v1's AUTOINCREMENT mark stays at 5.
+    const path = v1File(events.map(toRow), 4)
+    const j = await openJournal({ path, probe: localProbe() })
+    expect(j.status().state).toBe('open')
+    const page = await j.readFrom(0, MAX_PAGE)
+    expect(page.events).toEqual(events.slice(0, 3).map(e => rowToEvent(toRow(e))))
+    expect(page.cursor).toBe(3)
+    expect((await j.readFrom(1, MAX_PAGE)).events.map(e => e.eventId)).toEqual([events[1]!.eventId, events[2]!.eventId])
+    // A deleted id is appended again under a rowid ABOVE the old high-water mark, never 4 again.
+    expect((await j.append([events[3]!])).written).toBe(1)
+    expect((await j.readFrom(3, MAX_PAGE)).cursor).toBe(6)
+    // Idempotency survived the conversion: a migrated id is still a duplicate.
+    expect((await j.append([events[0]!]))).toEqual({ written: 0, duplicates: 1, rejected: [] })
+    j.close()
+    const db = new Database(path, { readonly: true })
+    expect((db.query('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2)
+    expect((db.query('PRAGMA integrity_check').get() as { integrity_check: string }).integrity_check).toBe('ok')
+    db.close()
+  })
+
+  test('a v1 row the encoding cannot reproduce fails the migration WHOLE and leaves v1 untouched', async () => {
+    const bad = { ...toRow(ev(hexId(7), 7)), occurred_at: '2026-09-25T10:00:00Z' } // not toISOString()'s form
+    const path = v1File([toRow(ev(hexId(6), 6)), bad])
+    const j = await openJournal({ path, probe: localProbe() })
+    expect(j.status()).toMatchObject({ state: 'disabled', reason: 'migrate-failed' })
+    j.close()
+    const db = new Database(path, { readonly: true })
+    expect((db.query('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(1)
+    expect((db.query('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n).toBe(2)
+    expect(db.query("SELECT 1 FROM sqlite_master WHERE name = 'event_strings'").get()).toBeNull()
+    db.close()
   })
 })

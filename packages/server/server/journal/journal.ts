@@ -40,9 +40,10 @@ import { existsSync, mkdirSync, statSync } from 'node:fs'
 import type { Database } from 'bun:sqlite'
 import type { AgentisticsEvent } from '@agentistics/core'
 import { JOURNAL_PATH } from '../config'
-import { planAppend, rowToEvent, type JournalRow } from './journal-plan'
+import { decodeInstant, decodeRow, encodeRow, planAppend, rowToEvent, type JournalRow, type StoredRow } from './journal-plan'
 import {
   JournalOpenError,
+  STORED_COLUMNS,
   classifyJournalPath,
   defaultPathProbe,
   openDatabase,
@@ -72,19 +73,15 @@ export interface OpenJournalOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
-/** The 17 columns, in the order the INSERT binds them. The rowid is the cursor and is never bound. */
-const COLUMNS = [
-  'event_id', 'schema', 'type', 'occurred_at', 'recorded_at',
-  'session_id', 'run_id', 'agent_id', 'task_id',
-  'source_kind', 'source_id', 'source_version',
-  'mode', 'confidence', 'adapter_version', 'source_ref',
-  'data',
-] as const satisfies readonly (keyof JournalRow)[]
-
+/**
+ * The INSERT binds `STORED_COLUMNS` (schema.ts): the v2 encoding of a `JournalRow` (journal-plan.ts
+ * `encodeRow`), with every repeated string interned into `event_strings` inside the SAME transaction
+ * as the rows that name it. The rowid is the cursor and is never bound.
+ */
 const INSERT_SQL =
-  `INSERT OR IGNORE INTO events (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`
+  `INSERT OR IGNORE INTO events (${STORED_COLUMNS.join(', ')}) VALUES (${STORED_COLUMNS.map(() => '?').join(', ')})`
 const PAGE_SQL =
-  `SELECT rowid AS cursor_rowid, ${COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
+  `SELECT rowid AS cursor_rowid, ${STORED_COLUMNS.join(', ')} FROM events WHERE rowid > ? ORDER BY rowid LIMIT ?`
 
 const RECOVERY_ATTEMPTS = 5
 const RECOVERY_DELAY_MS = 50
@@ -208,9 +205,9 @@ function safePlan(
   }
 }
 
-function bindRow(row: JournalRow): (string | number | null)[] {
-  return COLUMNS.map(c => {
-    const v = row[c] as string | number | null | undefined
+function bindRow(row: StoredRow): (string | number | Uint8Array | null)[] {
+  return STORED_COLUMNS.map(c => {
+    const v = row[c] as string | number | Uint8Array | null | undefined
     return v === undefined ? null : v
   })
 }
@@ -254,30 +251,67 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
       return disabledJournal(where, e instanceof JournalOpenError ? e.reason : 'open-failed')
     }
 
-    let insertTx: { immediate: (rows: JournalRow[]) => { written: number; duplicates: number } }
+    // The interned-string dictionary, as far as this process has seen it COMMITTED. An id is never
+    // reused and a string never rewritten (schema.ts), so a committed pair is valid for the life of
+    // the process whatever other processes write. Ids first met inside a transaction are held apart
+    // (`fresh`) and join the cache only once that transaction commits: a rolled-back batch takes
+    // its new strings with it, and a cached id for a row that no longer exists would name nothing.
+    const idOf = new Map<string, number>()
+    const stringOf = new Map<number, string>()
+    const remember = (fresh: Map<string, number>) => {
+      for (const [s, id] of fresh) { idOf.set(s, id); stringOf.set(id, s) }
+    }
+
+    let insertTx: { immediate: (rows: JournalRow[]) => { written: number; duplicates: number; fresh: Map<string, number> } }
     let pageStmt: ReturnType<Database['query']>
     let statsStmt: ReturnType<Database['query']>
+    let stringStmt: ReturnType<Database['query']>
     try {
       const insert = db.prepare(INSERT_SQL)
+      const findString = db.prepare('SELECT id FROM event_strings WHERE s = ?')
+      const addString = db.prepare('INSERT INTO event_strings (s) VALUES (?)')
       insertTx = db.transaction((rows: JournalRow[]) => {
+        const fresh = new Map<string, number>()
+        // Inside BEGIN IMMEDIATE this connection holds the write lock, so the SELECT sees every
+        // string any other process has committed and nobody can add one between it and the INSERT.
+        const intern = (s: string): number => {
+          const known = idOf.get(s) ?? fresh.get(s)
+          if (known !== undefined) return known
+          const hit = findString.get(s) as { id: number } | null
+          const id = hit ? hit.id : Number(addString.run(s).lastInsertRowid)
+          fresh.set(s, id)
+          return id
+        }
         let written = 0
         let duplicates = 0
         for (const row of rows) {
-          const { changes } = insert.run(...bindRow(row))
+          const { changes } = insert.run(...bindRow(encodeRow(row, intern)))
           if (changes === 1) written++
           else duplicates++
         }
-        return { written, duplicates }
+        return { written, duplicates, fresh }
       }) as unknown as typeof insertTx
       pageStmt = db.query(PAGE_SQL)
       statsStmt = db.query(
         'SELECT COUNT(*) AS n, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at FROM events',
       )
+      stringStmt = db.query('SELECT s FROM event_strings WHERE id = ?')
     } catch {
       // A table that does not have the columns we bind (schema.ts said it migrated, the statement
       // disagrees): the same outcome as a failed migration.
       try { db.close() } catch { /* already gone */ }
       return disabledJournal(where, 'migrate-failed')
+    }
+
+    /** An interned id → its string. An id no row of `event_strings` carries is a corrupt row: throw. */
+    const lookup = (id: number): string => {
+      const known = stringOf.get(id)
+      if (known !== undefined) return known
+      const hit = stringStmt.get(id) as { s: string } | null
+      if (!hit) throw new Error(`journal row names an unknown string id ${id}`)
+      idOf.set(hit.s, id)
+      stringOf.set(id, hit.s)
+      return hit.s
     }
 
     const counters = emptyCounters()
@@ -297,6 +331,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         try {
           const res = await withRecoveryRetry(() => insertTx.immediate(rows), recoveryPending, sleep)
           recoveryPending = false
+          remember(res.fresh)
           counters.written += res.written
           counters.duplicates += res.duplicates
           return { written: res.written, duplicates: res.duplicates, rejected }
@@ -314,11 +349,11 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
         const n = clampLimit(limit)
         if (n === 0 || state === 'closed') return { events: [], cursor }
         try {
-          const raw = pageStmt.all(cursor, n) as (JournalRow & { cursor_rowid: number })[]
+          const raw = pageStmt.all(cursor, n) as (StoredRow & { cursor_rowid: number })[]
           if (raw.length === 0) return { events: [], cursor }
           const events = raw.map(r => {
             const { cursor_rowid: _rowid, ...row } = r
-            return rowToEvent(row as JournalRow)
+            return rowToEvent(decodeRow(row as StoredRow, lookup))
           })
           return { events, cursor: Number(raw[raw.length - 1]!.cursor_rowid) }
         } catch {
@@ -332,7 +367,7 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
 
       async stats(): Promise<JournalStats> {
         if (state === 'closed') return { rows: 0, bytes: 0 }
-        type StatsRow = { n: number; first_at: string | null; last_at: string | null }
+        type StatsRow = { n: number; first_at: number | null; last_at: number | null }
         let r: StatsRow | null
         try {
           r = statsStmt.get() as StatsRow | null
@@ -344,8 +379,8 @@ export async function openJournal(opts: OpenJournalOptions = {}): Promise<Journa
           rows: Number(r?.n ?? 0),
           bytes: fileSize(path) + fileSize(`${path}-wal`),
         }
-        if (r?.first_at) out.firstAt = r.first_at
-        if (r?.last_at) out.lastAt = r.last_at
+        if (typeof r?.first_at === 'number') out.firstAt = decodeInstant(r.first_at)
+        if (typeof r?.last_at === 'number') out.lastAt = decodeInstant(r.last_at)
         return out
       },
 

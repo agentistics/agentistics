@@ -18,7 +18,8 @@
  *    summary that counted every rule an event broke would not add up to the batch size.
  *
  * `toRow` / `rowToEvent` are the other half: the column mapping, and the ONE normalisation the
- * table's ordering index needs (timestamps to UTC — see `toRow`'s own comment).
+ * table's ordering index needs (timestamps to UTC — see `toRow`'s own comment). `encodeRow` /
+ * `decodeRow` are the storage encoding under them (schema v2), lossless by construction.
  */
 import {
   CANONICAL_EVENT_SCHEMA, CONFIDENCES, isEventType,
@@ -267,6 +268,232 @@ export function rowToEvent(r: JournalRow): AgentisticsEvent {
   if (r.agent_id !== null) event.agentId = r.agent_id
   if (r.task_id !== null) event.taskId = r.task_id
   return event
+}
+
+// ── Storage encoding (schema v2) ─────────────────────────────────────────────────────────────────
+//
+// `JournalRow` above is the LOGICAL row: the event's fields as text, which is what the v1 table
+// stored verbatim. Measured on this machine's whole store (A1.7, `journal-budget-size.test.ts`),
+// that cost 667 B per event, and most of it was the same text written again on every row: a
+// 28-character `ses_…` / `run_…` / `agt_…` id three times, the transcript path in `source_ref`
+// (57 B), the words `harness` / `claude` / `replayed` / `exact` / the adapter and harness versions,
+// two 24-character ISO instants, a 32-character hex id (twice more in its UNIQUE index), and in
+// `data` every object KEY of every payload (`"cacheWriteByTtl":{"ephemeral_5m":…` on 100k rows).
+//
+// `StoredRow` is what v2 writes. Every transformation is EXACTLY invertible — `decodeRow(encodeRow(
+// r)) deep-equals r` for every row `toRow` can produce, and `journal-plan.test.ts` plus the
+// size budget's end-to-end read-back over the whole real store pin it:
+//
+//  - **Repeated text is interned** into `event_strings (id, s)` and the row carries the integer:
+//    `type`, `session_id`, `run_id`, `agent_id`, `task_id`, `source_kind`, `source_id`,
+//    `source_version`, `mode`, `confidence`, `adapter_version`, the `source_ref` BASE and the data
+//    SHAPE. The dictionary only ever grows (a string's id is never reused or rewritten), which is
+//    what makes an id safe to cache for the life of a process.
+//  - **`source_ref` is split at its last `:`** when what follows is a canonical decimal (`claude:
+//    <conversation>:<lineNo>` → base + line), so the per-file prefix is interned once per FILE.
+//  - **Instants are epoch milliseconds.** `toRow` has already normalised them to
+//    `Date#toISOString()`, which `new Date(ms).toISOString()` reproduces character for character.
+//  - **A 32-character lowercase hex `event_id` (the shape `deriveEventId` mints) is 16 raw bytes.**
+//    Any other id is stored as the text it is; the two can never collide, because a given id always
+//    takes the same form.
+//  - **`data` is split into a SHAPE and its VALUES** — see `encodeData`.
+
+/** An interned string's id. */
+export type Intern = (s: string) => number
+/** The string an interned id stands for. Throws on an unknown id: a row naming one is corrupt. */
+export type Lookup = (id: number) => string
+
+/** One row of the v2 `events` table, exactly as bound (the rowid, the cursor, is never bound). */
+export interface StoredRow {
+  event_id: string | Uint8Array
+  schema: number
+  type: number
+  occurred_at: number
+  recorded_at: number
+  session_id: number | null
+  run_id: number | null
+  agent_id: number | null
+  task_id: number | null
+  source_kind: number
+  source_id: number
+  source_version: number | null
+  mode: number
+  confidence: number
+  adapter_version: number
+  source_ref: number | null
+  source_ref_line: number | null
+  data_shape: number | null
+  data: string
+}
+
+const HEX_EVENT_ID_RE = /^[0-9a-f]{32}$/
+
+export function encodeEventId(id: string): string | Uint8Array {
+  return HEX_EVENT_ID_RE.test(id) ? new Uint8Array(Buffer.from(id, 'hex')) : id
+}
+
+export function decodeEventId(v: string | Uint8Array): string {
+  return typeof v === 'string' ? v : Buffer.from(v).toString('hex')
+}
+
+/**
+ * An instant `toRow` normalised, as epoch ms. THROWS when the text is not the normalised form: the
+ * integer would then decode to a different string, and a journal that rewrites what it was given
+ * is exactly what this encoding must never be. `toRow` makes that unreachable for anything the plan
+ * accepted.
+ */
+export function encodeInstant(iso: string): number {
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms) || new Date(ms).toISOString() !== iso) {
+    throw new RangeError(`journal instant is not in normalised form: ${iso}`)
+  }
+  return ms
+}
+
+export function decodeInstant(ms: number): string {
+  return new Date(ms).toISOString()
+}
+
+/** A canonical decimal line number that survives `Number` exactly (≤ 15 digits, no leading zero). */
+const REF_LINE_RE = /^([\s\S]*):(0|[1-9][0-9]{0,14})$/
+
+export function splitSourceRef(ref: string): { base: string; line: number | null } {
+  const m = REF_LINE_RE.exec(ref)
+  return m ? { base: m[1]!, line: Number(m[2]) } : { base: ref, line: null }
+}
+
+export function joinSourceRef(base: string, line: number | null): string {
+  return line === null ? base : `${base}:${line}`
+}
+
+/**
+ * A data SHAPE: the key sequence of a non-empty plain object, in order. An entry is a key whose value
+ * is a leaf, or `[key, shape]` for a key whose value is itself a non-empty plain object. A leaf is
+ * every other JSON value — a primitive, an array (arrays are never descended into, so the set of
+ * shapes stays finite), or an empty object.
+ */
+type Shape = (string | [string, Shape])[]
+
+function isNonEmptyObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length > 0
+}
+
+function shapeOf(o: Record<string, unknown>, leaves: unknown[]): Shape {
+  const shape: Shape = []
+  for (const k of Object.keys(o)) {
+    const v = o[k]
+    if (isNonEmptyObject(v)) shape.push([k, shapeOf(v, leaves)])
+    else { shape.push(k); leaves.push(v) }
+  }
+  return shape
+}
+
+/**
+ * `data` (the JSON text `toRow` wrote) → a shape id and the JSON array of its leaf values, in order:
+ * `{"provider":"anthropic","usage":{"input":3,"output":9}}` → shape `["provider",["usage",["input",
+ * "output"]]]` (interned: a payload type has a handful of shapes, so every row pays one small
+ * integer for all of its keys) and values `["anthropic",3,9]`. A `data` that is not a non-empty
+ * object (a string, an array, `{}`) is stored as its JSON text with no shape.
+ *
+ * `decodeData` rebuilds the SAME TEXT, byte for byte: the keys come back in their original order and
+ * each value is re-serialised by `JSON.stringify`, which is the identity on a value `JSON.parse`
+ * produced. So `rowToEvent` parses exactly what it parsed before — `"__proto__"` included.
+ */
+export function encodeData(json: string, intern: Intern): { shape: number | null; values: string } {
+  const value: unknown = JSON.parse(json)
+  if (!isNonEmptyObject(value)) return { shape: null, values: json }
+  const leaves: unknown[] = []
+  const shape = shapeOf(value, leaves)
+  return { shape: intern(JSON.stringify(shape)), values: JSON.stringify(leaves) }
+}
+
+function buildJson(shape: Shape, leaves: unknown[], at: { i: number }): string {
+  const parts: string[] = []
+  for (const entry of shape) {
+    if (typeof entry === 'string') {
+      if (at.i >= leaves.length) throw new RangeError('journal data has fewer values than its shape')
+      parts.push(`${JSON.stringify(entry)}:${JSON.stringify(leaves[at.i++])}`)
+    } else {
+      parts.push(`${JSON.stringify(entry[0])}:${buildJson(entry[1], leaves, at)}`)
+    }
+  }
+  return `{${parts.join(',')}}`
+}
+
+/** Parsed shapes by their text — a journal holds a few dozen; the cap only bounds a pathological one. */
+const SHAPE_MEMO = new Map<string, Shape>()
+const SHAPE_MEMO_MAX = 4096
+
+function parseShape(text: string): Shape {
+  let s = SHAPE_MEMO.get(text)
+  if (!s) {
+    s = JSON.parse(text) as Shape
+    if (SHAPE_MEMO.size >= SHAPE_MEMO_MAX) SHAPE_MEMO.clear()
+    SHAPE_MEMO.set(text, s)
+  }
+  return s
+}
+
+export function decodeData(shapeText: string | null, values: string): string {
+  if (shapeText === null) return values
+  const leaves = JSON.parse(values) as unknown[]
+  const at = { i: 0 }
+  const json = buildJson(parseShape(shapeText), leaves, at)
+  if (at.i !== leaves.length) throw new RangeError('journal data has more values than its shape')
+  return json
+}
+
+const internOrNull = (s: string | null, intern: Intern): number | null => (s === null ? null : intern(s))
+const lookupOrNull = (id: number | null, lookup: Lookup): string | null => (id === null ? null : lookup(id))
+
+/** The logical row → what v2 binds. See the section header for why each step is invertible. */
+export function encodeRow(r: JournalRow, intern: Intern): StoredRow {
+  const ref = r.source_ref === null ? null : splitSourceRef(r.source_ref)
+  const data = encodeData(r.data, intern)
+  return {
+    event_id: encodeEventId(r.event_id),
+    schema: r.schema,
+    type: intern(r.type),
+    occurred_at: encodeInstant(r.occurred_at),
+    recorded_at: encodeInstant(r.recorded_at),
+    session_id: internOrNull(r.session_id, intern),
+    run_id: internOrNull(r.run_id, intern),
+    agent_id: internOrNull(r.agent_id, intern),
+    task_id: internOrNull(r.task_id, intern),
+    source_kind: intern(r.source_kind),
+    source_id: intern(r.source_id),
+    source_version: internOrNull(r.source_version, intern),
+    mode: intern(r.mode),
+    confidence: intern(r.confidence),
+    adapter_version: intern(r.adapter_version),
+    source_ref: ref === null ? null : intern(ref.base),
+    source_ref_line: ref === null ? null : ref.line,
+    data_shape: data.shape,
+    data: data.values,
+  }
+}
+
+/** The inverse of `encodeRow`. */
+export function decodeRow(s: StoredRow, lookup: Lookup): JournalRow {
+  return {
+    event_id: decodeEventId(s.event_id),
+    schema: s.schema,
+    type: lookup(s.type),
+    occurred_at: decodeInstant(s.occurred_at),
+    recorded_at: decodeInstant(s.recorded_at),
+    session_id: lookupOrNull(s.session_id, lookup),
+    run_id: lookupOrNull(s.run_id, lookup),
+    agent_id: lookupOrNull(s.agent_id, lookup),
+    task_id: lookupOrNull(s.task_id, lookup),
+    source_kind: lookup(s.source_kind),
+    source_id: lookup(s.source_id),
+    source_version: lookupOrNull(s.source_version, lookup),
+    mode: lookup(s.mode),
+    confidence: lookup(s.confidence),
+    adapter_version: lookup(s.adapter_version),
+    source_ref: s.source_ref === null ? null : joinSourceRef(lookup(s.source_ref), s.source_ref_line),
+    data: decodeData(s.data_shape === null ? null : lookup(s.data_shape), s.data),
+  }
 }
 
 // ── Batch planning ──────────────────────────────────────────────────────────────────────────────

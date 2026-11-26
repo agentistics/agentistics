@@ -340,4 +340,20 @@ describe('event ids are keyed on providerRequestId, ignoring sourceRef (O-8)', (
     const completed2 = events2.find((e) => e.type === 'model.completed')!
     expect(completed2.eventId).toBe(completed.eventId)
   })
+
+  it('model.invoked is STILL keyed on the id, but its payload no longer repeats it (1.2.0)', () => {
+    const events = runAll([
+      assistantEntry({ id: 'resp-9', model: 'claude-a', usage: { input: 1, output: 1 } }),
+    ], 1)
+    const invoked = events.find((e) => e.type === 'model.invoked')!
+    const completed = events.find((e) => e.type === 'model.completed')!
+    expect(invoked.eventId).toBe(deriveEventId({
+      sourceKind: 'harness', sourceId: CLAUDE_SOURCE_ID, sourceRef: 'irrelevant:1',
+      type: 'model.invoked', providerRequestId: 'resp-9',
+    }))
+    expect(invoked.data).toEqual({ provider: 'anthropic', model: 'claude-a' })
+    // The id is not lost: the paired completed event, from the same line, carries it.
+    expect((completed.data as { providerRequestId?: string }).providerRequestId).toBe('resp-9')
+    expect(completed.provenance.sourceRef).toBe(invoked.provenance.sourceRef)
+  })
 })
