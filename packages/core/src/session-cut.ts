@@ -14,6 +14,7 @@
  * range is the whole session.
  */
 import type { ModelUsage } from './types'
+import { usageTokenTotal } from './tokens'
 
 type Counters = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
 type Cuttable = Partial<Counters> & {
@@ -51,6 +52,18 @@ export function cutSessionUsage<S extends Cuttable>(s: S, cut: Counters): S {
         outputTokens: u.outputTokens * k.output,
         cacheReadInputTokens: u.cacheReadInputTokens * k.cacheRead,
         cacheCreationInputTokens: cw,
+      }
+      // A DECLARED cost (`costSource`) is taken as given by `calcCost`, so it must be cut too, or the
+      // range carries the session's whole bill. It follows the model's token share, the same
+      // proportion of measured totals the counters keep; a table-priced row is priced from the cut
+      // counters and needs nothing here.
+      // With no tokens to apportion (a declared cost on a zero-token row) the cost is kept whole:
+      // the session is in range, and a share of nothing would silently drop its bill.
+      if (u.costSource !== undefined) {
+        const lifetime = usageTokenTotal(u)
+        const share = lifetime > 0 ? usageTokenTotal(next) / lifetime : 1
+        next.costUSD = u.costUSD * share
+        if (u.unpricedTokens !== undefined) next.unpricedTokens = u.unpricedTokens * share
       }
       if (u.cacheCreation1hInputTokens !== undefined && u.cacheCreation5mInputTokens !== undefined) {
         const share = ratio(u.cacheCreation1hInputTokens, u.cacheCreation1hInputTokens + u.cacheCreation5mInputTokens)
