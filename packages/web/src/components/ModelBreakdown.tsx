@@ -32,16 +32,19 @@ interface Props {
   /** API cost for each model split by harness. Required for mixed-harness plan pricing. */
   costByHarness?: Record<string, Readonly<Record<string, number>>>
   planFactors?: Readonly<Record<string, number | null>> | null
-  lang?: 'en' | 'pt'
+  /** Required: every caller that left it out printed the table in English under a Portuguese UI (owner print 2521fdb5). */
+  lang: 'en' | 'pt'
 }
 
 
 
 const COL: React.CSSProperties = { fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }
-const GRID = 'minmax(120px,1fr) 56px 64px 64px 64px 88px'
+// The cost column holds the widest label the table prints: pt "desconhecido" in its pill is ~105px, and at 88px it
+// ran under the frame's right edge (CUSTO.MODELO-OPENCODE). Mobile keeps 88px and shrinks that one pill instead.
+const GRID = 'minmax(120px,1fr) 56px 64px 64px 64px 108px'
 const GRID_MOBILE = 'minmax(100px,1fr) 56px 70px 88px'
 
-export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1, fallbackInputTokens, fallbackOutputTokens, fallbackCostUSD, planFactor, costByHarness, planFactors, lang = "en" }: Props) {
+export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1, fallbackInputTokens, fallbackOutputTokens, fallbackCostUSD, planFactor, costByHarness, planFactors, lang }: Props) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const L = modelTableLabels(lang)
@@ -280,10 +283,10 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
             {/* Cost */}
             <div style={{ textAlign: 'right' }}>
               <span style={{
-                fontSize: 12, fontWeight: 700,
+                fontSize: isMobile && isUnpricedModel(modelId) ? 10.5 : 12, fontWeight: 700,
                 color: 'var(--anthropic-orange)',
                 background: 'var(--anthropic-orange-dim)',
-                padding: '2px 7px', borderRadius: 5,
+                padding: isMobile && isUnpricedModel(modelId) ? '2px 4px' : '2px 7px', borderRadius: 5,
                 whiteSpace: 'nowrap',
               }}>
                 {isUnpricedModel(modelId) ? UNPRICED_MODEL_LABEL[lang] : fmtCost(costUSD, currency, brlRate)}

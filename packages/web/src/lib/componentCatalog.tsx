@@ -345,6 +345,7 @@ export const CATALOG: CatalogItem[] = [
           modelUsage={derived.modelUsage}
           currency={currency}
           brlRate={brlRate}
+          lang={lang}
           fallbackInputTokens={filters.projects.length > 0 ? derived.inputTokens : undefined}
           fallbackOutputTokens={filters.projects.length > 0 ? derived.outputTokens : undefined}
           fallbackCostUSD={filters.projects.length > 0 ? derived.totalCostUSD : undefined}

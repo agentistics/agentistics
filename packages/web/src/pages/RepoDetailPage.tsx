@@ -191,6 +191,7 @@ export default function RepoDetailPage() {
               modelUsage={scoped.modelUsage}
               currency={currency}
               brlRate={brlRate}
+              lang={pt ? 'pt' : 'en'}
               fallbackInputTokens={scoped.inputTokens}
               fallbackOutputTokens={scoped.outputTokens}
               fallbackCostUSD={scoped.totalCostUSD}
