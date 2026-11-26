@@ -126,6 +126,23 @@ export function pendingContextFor(plan: SpawnPlan, context: SpawnRequest['contex
   return context && plan.contextVia === 'none' ? context.block : undefined
 }
 
+/**
+ * ORQ.H1: a LEADER's briefing (a fresh leader, a hand-off successor) opens with the owner's still-open
+ * requests on its task, literal text and age (`PEDIDOS ABERTOS DO DONO`, from the engine's flows). A
+ * worker, a session with no task, flows off or no engine: unchanged. Never throws.
+ */
+export async function withOwnerRequests<T extends { role?: string; taskId?: string }>(i: T): Promise<T & { ownerRequests?: string }> {
+  if (i.role !== 'leader' || !i.taskId) return i
+  try {
+    const { flowsExperimentalOn } = await import('../native-gate')
+    if (!flowsExperimentalOn()) return i
+    const load = await import('../engine/load')
+    await load.loadEngine({ log: () => {} })
+    const view = await load.engine()?.flows?.read?.('pedidos', { taskId: i.taskId }) as { section?: unknown } | null | undefined
+    return typeof view?.section === 'string' && view.section ? { ...i, ownerRequests: view.section } : i
+  } catch { return i }
+}
+
 export function buildSpawnContext(i: Omit<ContextInput, 'harnesses' | 'specSkills'> & { harnesses?: readonly string[]; specSkills?: readonly string[]; harness?: string }): NonNullable<SpawnRequest['context']> {
   const full: ContextInput = {
     ...i,
