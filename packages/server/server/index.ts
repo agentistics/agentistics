@@ -5468,7 +5468,8 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
       })
     })().catch(err => console.error('[agentask] deadline reminders:', err instanceof Error ? err.message : String(err)))
   }
-  setTimeout(deadlineTick, 60_000).unref()
+  // First pass after boot; AGENTISTICS_DEADLINE_FIRST_MS lets a throwaway test server run it sooner.
+  setTimeout(deadlineTick, Math.max(1_000, Number(process.env.AGENTISTICS_DEADLINE_FIRST_MS) || 60_000)).unref()
   setInterval(deadlineTick, 30 * 60_000).unref()
   // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
   // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
