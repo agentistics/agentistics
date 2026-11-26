@@ -21,6 +21,14 @@ export interface AccountRowData {
   retired?: boolean
   /** The harness answered that it has no login here (never stored; see the server's `signedOut`). */
   signedOut?: true
+  /**
+   * HOTFIX.LOGIN-EXPIRADO — the server's word for whether this account can work now: `expired` (the
+   * harness refused its login while running), `signed_out` (no login holds it). Absent from an older
+   * server or for a retired account.
+   */
+  login?: 'ok' | 'expired' | 'signed_out'
+  /** "Sign in again" can run from the app for this account, re-binding the same id. */
+  relogin?: boolean
 }
 
 /** The literal the server stores when a harness cannot say whose account a folder holds. */

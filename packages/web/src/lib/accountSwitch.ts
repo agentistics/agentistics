@@ -6,12 +6,13 @@
 
 import { HARNESS_LABELS } from '@agentistics/core'
 import { withReopening } from './reopeningStore'
+import type { SessionAuth } from './accountRelogin'
 
 /** One account a session could move to. `harness` other than the session's own = a hand-off (new conversation + summary). */
 export interface SwitchOption { id: string; harness: string; label: string; plan?: string; recommended?: boolean }
 
 /** Why an account is not a target (the server's code; `accountPicker.ts` words it). */
-export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'login_expired' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
 
 export interface SwitchUnavailable { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }
 
@@ -25,6 +26,8 @@ export interface SwitchInfo {
   unavailable?: SwitchUnavailable[]
   /** The conversation's last turn was refused by the account's usage limit. */
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  /** HOTFIX.LOGIN-EXPIRADO: the session's account cannot work (login refused / signed out). Absent from an older server. */
+  auth?: SessionAuth | null
 }
 
 /** `ended` + `endedId`: the session WAS ended and could not be given back — the row to Reopen. */

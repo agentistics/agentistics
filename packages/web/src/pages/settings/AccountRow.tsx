@@ -7,7 +7,7 @@
  * Reuses the app's pieces only: Toggle, Pill, PlanUsageRing, HarnessMark, IconButton.
  */
 import React from 'react'
-import { Pencil, X } from 'lucide-react'
+import { KeyRound, Pencil, X } from 'lucide-react'
 import { windowKey, type BillingMode, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { PlanUsageRing } from '../../components/PlanLimitMeter'
@@ -18,6 +18,7 @@ import { HARNESS_LABELS } from '../../lib/harness'
 import { currentUsedPct, resetPhrase, usePlanLimits, windowLabel, windowShort } from '../../lib/planLimits'
 import { usageColors, USAGE_NO_READING_COLOR } from '../../lib/usageColors'
 import { Toggle } from './primitives'
+import { AUTH_COPY } from '../../lib/accountRelogin'
 import { planCoverageText, REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
 
 type Lang = 'pt' | 'en'
@@ -80,6 +81,8 @@ export interface BillingAccountListProps {
   /** Assistants whose notice the person closed. */
   hiddenSignedOut?: ReadonlySet<string>
   onHideSignedOut?: (harness: BillingRowView['harness']) => void
+  /** HOTFIX.LOGIN-EXPIRADO: "Sign in again" on a row whose account's login expired or is signed out. */
+  onRelogin?: (row: BillingRowView) => void
 }
 
 const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', overflowWrap: 'break-word' }
@@ -125,6 +128,9 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
+/** The row's account cannot work now (its login expired, or nothing holds it). */
+export const loginOff = (r: BillingRowView): boolean => r.account?.login === 'expired' || r.account?.login === 'signed_out'
+
 const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan || r.starts ? t.edit : r.detected ? t.confirm : t.setPlan)
 
 /**
@@ -135,6 +141,7 @@ const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ?
 export function BillingAccountList(p: BillingAccountListProps) {
   const pt = p.lang === 'pt'
   const t = T(pt)
+  const a = AUTH_COPY(pt)
   const isMobile = useIsMobile()
   const target = isMobile ? 44 : 32
   const { budgets, readings } = usePlanLimits()
@@ -191,9 +198,16 @@ export function BillingAccountList(p: BillingAccountListProps) {
                 <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
                 <span data-billing-subtitle style={{ ...cellText, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                   {HARNESS_LABELS[r.harness] ?? r.harness} · <PlanCell r={r} t={t} />
+                  {loginOff(r) && <> · <span data-account-login-state={r.account!.login}><Pill tone="error" nowrap>{r.account!.login === 'expired' ? a.rowExpired : a.rowSignedOut}</Pill></span></>}
                 </span>
               </span>
             </span>
+            {loginOff(r) && r.account!.relogin && p.onRelogin && (
+              <button type="button" data-account-row-relogin onClick={() => p.onRelogin?.(r)} style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, order: isMobile ? 3 : undefined, flexBasis: isMobile ? '100%' : undefined, minHeight: target, padding: '0 12px', borderRadius: 'var(--radius-md, 8px)',
+                border: '1px solid var(--anthropic-orange)', background: 'transparent', color: 'var(--anthropic-orange)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}><KeyRound size={14} aria-hidden />{a.relogin}</button>
+            )}
             <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto', flexShrink: 0 }}>
               <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} />
               {r.account && (

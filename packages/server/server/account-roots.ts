@@ -28,11 +28,11 @@ import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, PORT } from './config'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
-  type AccountIdentity,
+  type AccountIdentity, type HarnessAccount,
 } from './harness-accounts'
 import { agentisticsMcpLaunch, rootMcpRegistration } from './mcp-launch'
 import { reportAuditFailure, writeAudit } from './audit'
-import { claudeKeychainService, loginLog, LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
+import { claudeKeychainService, launchLoginProcess, loginLog, LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
 import { applyAccountToPlan } from './sessions/account-plan'
 
 export { applyAccountToPlan }
@@ -196,6 +196,31 @@ export async function linkSharedFiles(
   }
   return linked
 }
+
+/**
+ * HOTFIX.LOGIN-EXPIRADO. Can "Sign in again" run from the app for this account, re-binding the SAME
+ * id? An account in its own root needs a harness that can move its login folder and has a login
+ * recipe; an account on the harness's DEFAULT folder needs a recipe and an identity probe (the probe is
+ * what proves the new login is the same person) — gemini's first-run login writes into the folder's
+ * settings, so its default folder is not offered. Retired accounts are removed, not expired.
+ */
+export function reloginSupported(a: Pick<HarnessAccount, 'harness' | 'root' | 'retired'>): boolean {
+  if (a.retired || !LOGIN_ADAPTERS[a.harness]) return false
+  if (a.root) return ISOLATION_ENV[a.harness] !== null
+  return IDENTITY_PROBES[a.harness] !== null && a.harness !== 'gemini'
+}
+
+/** PURE. Where an account is signed in: the binding that names it (its own root first), else its recorded root. */
+export function reloginRoot(file: { bindings: Record<string, string> }, a: Pick<HarnessAccount, 'id' | 'harness' | 'root'>): string | null {
+  const roots = Object.entries(file.bindings).filter(([k, v]) => v === a.id && k.startsWith(`${a.harness}:`)).map(([k]) => k.slice(a.harness.length + 1) || null)
+  if (a.root && roots.includes(a.root)) return a.root
+  return roots.find(r => r !== null) ?? (roots.length ? null : a.root)
+}
+
+export type ReloginStatus =
+  | { status: 'pending'; accountId: string; login?: LoginInfo }
+  | { status: 'done'; accountId: string; boundId: string; same: boolean }
+  | { status: 'failed'; accountId: string; error: LoginError; message: string; detail?: string }
 
 export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const base = () => deps.base ?? defaultBase()
@@ -449,8 +474,8 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   function ensurePoller(intervalMs = 2000): void {
     if (timer) return
     timer = setInterval(() => {
-      void pollPending().then(async () => {
-        if (!(await list()).some(r => r.status === 'pending')) stopPoller()
+      void pollPending().then(() => pollRelogins()).then(async () => {
+        if (!(await list()).some(r => r.status === 'pending') && !reloginPending()) stopPoller()
       }).catch(() => {})
     }, intervalMs)
     timer.unref?.()
@@ -519,7 +544,145 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
 
   const removeRoot = (id: string, body: { confirm?: unknown } = {}) => serialized(() => removeRootUnlocked(id, body))
 
-  return { createRoot, startLogin, addRoot, submitCode, verifyPending, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
+  // ── Sign in again (HOTFIX.LOGIN-EXPIRADO) ────────────────────────────────────────────────────
+  interface Relogin {
+    accountId: string; harness: HarnessId; root: string | null; pendingId: string
+    /** Working folder of a default-root sign-in (the CLI's cwd and private PATH), removed after. */
+    scratch?: string
+    /** The CLI's own exit status, once it ended by itself (never after we stopped it). */
+    exited?: number
+    state: ReloginStatus
+    at: number
+  }
+  const relogins = new Map<string, Relogin>()
+  const dropScratch = async (r: Relogin) => {
+    if (r.scratch && resolve(r.scratch).startsWith(resolve(base()) + sep)) await rm(r.scratch, { recursive: true, force: true }).catch(() => {})
+  }
+
+  /**
+   * Start a sign-in for an EXISTING account, in the folder it already lives in. The new login lands
+   * where the old one was, and the bind re-adopts the same id (nickname, plan, history and the agent
+   * switch kept: they are fields of the record, never touched here). Completion is the CLI ending
+   * with status 0 — an identity probe alone cannot tell a fresh token from the expired one, which
+   * still names its owner.
+   */
+  async function relogin(accountId: string, signal?: AbortSignal): Promise<({ ok: true; pendingId: string } & LoginInfo) | RootRefused | { ok: false; reason: 'not_found' | 'retired'; message: string }> {
+    if (!flagOn()) return { ok: false, reason: 'disabled', message: say('Multiple accounts are not enabled.') }
+    const account = await getAccount(accountId)
+    if (!account) return { ok: false, reason: 'not_found', message: say('No such account.') }
+    if (account.retired) return { ok: false, reason: 'retired', message: say('This account was removed.') }
+    const file = await listAccounts()
+    const root = reloginRoot(file, account)
+    if (!reloginSupported({ ...account, root })) {
+      return { ok: false, reason: 'unsupported', message: say('This assistant cannot be signed in again from the app for this account.') }
+    }
+    if (root && (!isRootPath(root) || await hasSymlinkPart(root) || !(await stat(root).then(s => s.isDirectory(), () => false)))) {
+      return { ok: false, reason: 'unsafe_path', message: say('The account folder is missing or is not an account folder.') }
+    }
+    const live = relogins.get(account.id)
+    if (live?.state.status === 'pending') {
+      const info = logins.get(live.pendingId)?.info()
+      if (info) return { ok: true, pendingId: live.pendingId, ...info }
+      await cancelRelogin(account.id)
+    }
+    const pendingId = `l_${randomBytes(6).toString('hex')}`
+    let workdir = root
+    let scratch: string | undefined
+    if (!workdir) {
+      scratch = join(base(), '.relogin', pendingId)
+      await mkdir(scratch, { recursive: true, mode: 0o700 })
+      workdir = scratch
+    }
+    // A sign-in that died mid-way can leave its private PATH folder behind; the next one recreates it.
+    await rm(join(workdir, '.login-bin'), { recursive: true, force: true }).catch(() => {})
+    const entry: Relogin = { accountId: account.id, harness: account.harness, root, pendingId, ...(scratch ? { scratch } : {}), state: { status: 'pending', accountId: account.id }, at: Date.now() }
+    relogins.set(account.id, entry)
+    const baseLaunch = deps.loginOptions?.launch ?? launchLoginProcess
+    let stopping = false
+    const options: LoginOptions = {
+      ...deps.loginOptions,
+      launch: async req => {
+        const proc = await baseLaunch(req)
+        void proc.exited.then(code => { if (!stopping) entry.exited = code })
+        return { ...proc, stop: async () => { stopping = true; await proc.stop() } }
+      },
+    }
+    try {
+      const handle = await login({ harness: account.harness, pendingId, root: workdir, env: root ? rootEnv(account.harness, root) : {} },
+        async (reason, detail) => {
+          if (relogins.get(account.id) !== entry || entry.state.status !== 'pending') return
+          entry.state = { status: 'failed', accountId: account.id, error: reason, message: LOGIN_MESSAGES[reason], ...(detail ? { detail } : {}) }
+          logins.delete(pendingId)
+          await dropScratch(entry)
+        }, options)
+      logins.set(pendingId, handle)
+      if (signal?.aborted) { await cancelRelogin(account.id); throw new LoginFailure('login_failed') }
+      const info = await handle.ready
+      ensurePoller()
+      auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'relogin_start', harness: account.harness } })
+      return { ok: true, pendingId, ...info }
+    } catch (error) {
+      const reason = error instanceof LoginFailure ? error.reason : 'login_unavailable'
+      if (relogins.get(account.id) === entry) relogins.delete(account.id)
+      await logins.get(pendingId)?.stop().catch(() => {})
+      logins.delete(pendingId)
+      await dropScratch(entry)
+      return { ok: false, reason, message: LOGIN_MESSAGES[reason] }
+    }
+  }
+
+  function reloginStatus(accountId: string): ReloginStatus | null {
+    const entry = relogins.get(accountId)
+    if (!entry) return null
+    if (entry.state.status === 'pending') {
+      const info = logins.get(entry.pendingId)?.info()
+      return { status: 'pending', accountId, ...(info ? { login: info } : {}) }
+    }
+    return entry.state
+  }
+
+  async function reloginCode(accountId: string, code: unknown) {
+    const entry = relogins.get(accountId)
+    if (!entry || entry.state.status !== 'pending') return { ok: false as const, reason: 'not_found', message: 'This sign-in is no longer available.' }
+    return submitCode(entry.pendingId, code)
+  }
+
+  async function cancelRelogin(accountId: string): Promise<boolean> {
+    const entry = relogins.get(accountId)
+    if (!entry) return false
+    relogins.delete(accountId)
+    await logins.get(entry.pendingId)?.stop().catch(() => {})
+    logins.delete(entry.pendingId)
+    await dropScratch(entry)
+    return true
+  }
+
+  /** One pass over the sign-ins-again: a CLI that ended with 0 is probed and its login bound in place. */
+  async function pollReloginsUnlocked(): Promise<string[]> {
+    const bound: string[] = []
+    for (const [accountId, entry] of relogins) {
+      if (entry.state.status !== 'pending') {
+        if (Date.now() - entry.at > 900_000) relogins.delete(accountId)
+        continue
+      }
+      if (entry.exited !== 0) continue
+      const identity = await probe(entry.harness, entry.root as string).catch(() => null)
+      if (!identity || identity.key === 'default') continue
+      const { account } = await bind(entry.root, { harness: entry.harness, ...identity })
+      entry.state = { status: 'done', accountId, boundId: account.id, same: account.id === accountId }
+      entry.at = Date.now()
+      await logins.get(entry.pendingId)?.stop().catch(() => {})
+      logins.delete(entry.pendingId)
+      await dropScratch(entry)
+      bound.push(account.id)
+      auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'relogin', harness: entry.harness } })
+    }
+    return bound
+  }
+  const pollRelogins = () => serialized(pollReloginsUnlocked)
+  const reloginPending = () => [...relogins.values()].some(r => r.state.status === 'pending')
+
+  return { createRoot, startLogin, addRoot, submitCode, verifyPending, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn, relogin, reloginStatus, reloginCode, cancelRelogin, pollRelogins }
 }
 
 export interface McpChild { exited: Promise<number>; kill: (signal?: string) => void }

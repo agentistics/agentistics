@@ -13,6 +13,7 @@
  *  5. candidates = the accounts the switch itself would accept (`options`: same harness, agentic, signed in, not the
  *     current one) that ALSO pass the budget thresholds (5 h < 85 %, week < 95 %), have a FRESH reading, and have a
  *     slot left; minus every account that already limited this conversation in this episode (the loop guard);
+ *     and minus every account whose login the harness refused (`expired`: no room, ever, until re-signed in);
  *  6. the plan router's own policy (`pickAccount`, the one place it lives) chooses among them.
  *
  * QA round 1 (F1–F9): a move writes `seenAt` = the move's own time, and a limit line that is not NEWER than it is the copy
@@ -72,6 +73,13 @@ export interface AutoInput {
   options: readonly SwitchOption[]
   /** The agent-visible plan budgets (`planLimitsPayload().budgets`), one row per account. */
   budgets: readonly AccountBudget[]
+  /**
+   * Accounts whose login the harness refused (HOTFIX.LOGIN-EXPIRADO). Never a target, whatever their
+   * budget says: a meter read before the token expired still shows room, and a move onto one ends the
+   * session for a pane that can only print "Please run /login". `options` already leaves them out;
+   * this is the policy's own guard, so the rule holds even when a caller's options are stale.
+   */
+  expired?: ReadonlySet<string>
   episode?: AutoEpisode | undefined
 }
 
@@ -134,7 +142,7 @@ export function decideAutoSwitch(i: AutoInput): AutoDecision {
     else if (ep.movedAt !== undefined && i.now - ep.movedAt < SETTLE_MS) return { kind: 'skip', why: 'stale_limit' }
   }
   const tried = new Set([...(ep?.tried ?? []), current])
-  const candidates = i.options.filter(o => o.harness === i.harness && !tried.has(o.id) && !i.takenThisTick?.has(o.id))
+  const candidates = i.options.filter(o => o.harness === i.harness && !tried.has(o.id) && !i.takenThisTick?.has(o.id) && !i.expired?.has(o.id))
   const pick = bestAccount(i.harness, candidates.map(o => o.id), i.budgets, i.model)
   const target = candidates.find(o => o.id === pick)
   const when = resetsAt !== undefined ? { resetsAt } : {}

@@ -47,6 +47,8 @@ export interface AutoSwitchDeps {
   budgets: () => Promise<readonly AccountBudget[]>
   /** The accounts the switch would accept for this row (agentic, signed in, same harness first). */
   options: (row: ManagedSession, accountId: string | undefined) => Promise<readonly SwitchOption[]>
+  /** Accounts whose login the harness refused (registry `loginExpiredAt`): never a target. */
+  expired?: () => Promise<ReadonlySet<string>>
   switchAccount: (req: { id: string; accountId: string; resendPending: true }) => Promise<{ ok: boolean; message?: string; id?: string }>
   /** Type a message into a live session (the single resume after a "nobody has room" stop). */
   sendPrompt?: (id: string, text: string) => Promise<boolean>
@@ -79,6 +81,7 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
   // recorded as already handled (so a copy of an old limit is never taken for a new one) and decided afresh only by a NEWER limit.
   const conservative = read.corrupt
   let budgets: readonly AccountBudget[] | null = null
+  let expired: ReadonlySet<string> | null = null
   const taken = new Set<string>()
   for (const row of rows) {
     if (!conservative && out.moved.length >= MAX_MOVES_PER_TICK) break
@@ -110,11 +113,12 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
         continue
       }
       budgets ??= await d.budgets()
+      expired ??= d.expired ? await d.expired().catch(() => new Set<string>()) : new Set<string>()
       const decision = decideAutoSwitch({
         enabled: true, now: d.now(), harness, supported: true, ...(current ? { currentAccount: current } : {}),
         limit: { ...(probe.resetsAt !== undefined ? { resetsAt: probe.resetsAt } : {}), ...(probe.at !== undefined ? { at: probe.at } : {}) },
         ...(row.model ? { model: row.model } : {}), takenThisTick: taken,
-        options: await d.options(row, current), budgets, episode,
+        options: await d.options(row, current), budgets, episode, expired,
       })
       if (decision.kind === 'skip' || decision.kind === 'clear') continue
       const from = (await d.label(harness, current)) ?? current ?? harness
@@ -209,8 +213,12 @@ export async function defaultAutoSwitchDeps(lang: 'en' | 'pt'): Promise<AutoSwit
     },
     // The transcript path is remembered per conversation and its tail re-read only when the file's mtime changed (QA F7).
     limitOf: async row => {
-      const { readLimitProbe } = await import('./account-switch-io')
-      const r = await readLimitProbe({ harness: row.harness as HarnessId, conversationId: row.conversationId!, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }, probeCache)
+      const { readTailProbe, syncLoginExpiry } = await import('./account-switch-io')
+      const tail = await readTailProbe({ harness: row.harness as HarnessId, conversationId: row.conversationId!, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }, probeCache)
+      // The same read keeps the registry's "login expired" mark in step, so Usage → Accounts shows it
+      // without anybody opening the session.
+      await syncLoginExpiry(row.accountId, tail)
+      const r = tail.limit
       return r.kind === 'limited'
         ? { kind: 'limited', ...(r.state.resetsAt !== undefined ? { resetsAt: r.state.resetsAt } : {}), ...(r.state.at !== undefined ? { at: r.state.at } : {}), ...(r.state.pendingPrompt ? { pendingPrompt: r.state.pendingPrompt } : {}) }
         : r
@@ -230,6 +238,10 @@ export async function defaultAutoSwitchDeps(lang: 'en' | 'pt'): Promise<AutoSwit
     options: async (row, accountId) => {
       const { listSwitchTargets } = await import('./account-switch-io')
       return (await listSwitchTargets({ harness: row.harness as HarnessId, ...(accountId ? { accountId } : {}), agentCaller: true })).options
+    },
+    expired: async () => {
+      const { spawnAccountRows } = await import('./spawn-account-io')
+      return new Set((await spawnAccountRows()).filter(a => a.expired).map(a => a.id))
     },
     switchAccount: async req => {
       const { hostForFleet } = await import('./fleet-web')
