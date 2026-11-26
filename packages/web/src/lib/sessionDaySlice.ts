@@ -23,7 +23,7 @@ import { localDayCache } from './tzSignature'
  * they fall back to being filed on their start day — the answer this product has always given.
  *
  * Activity days use the local clock, matching the server parser on the user's machine.
- * Billing and tag projections keep their separate UTC contract.
+ * Tag projections keep their separate UTC contract.
  */
 
 export interface DayUsage {

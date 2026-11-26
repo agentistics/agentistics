@@ -336,14 +336,15 @@ describe('benchmarkFormat', () => {
 
 describe('r4: period day, whole history, formulas in pt', () => {
   test('F20: the day label is the LOCAL one — 23:59:59 local of the 13th is the 13th, not the 14th', () => {
-    const prev = process.env.TZ
+    // Restore with a value, never `delete` (tzRestore.lint.test.ts).
+    const prev = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
     process.env.TZ = 'America/Sao_Paulo'
     try {
       const end = new Date(2026, 10, 13, 23, 59, 59, 999).getTime()   // 13/11 local = 14/11 02:59 UTC
       expect(new Date(end).getUTCDate()).toBe(14)
       expect(dayLabel(end, 'pt')).toBe('13/11/2026')
       expect(dayLabel(end, 'en')).toBe('2026-11-13')
-    } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev }
+    } finally { process.env.TZ = prev }
   })
 
   test('F7: every one of the nine formulas is Portuguese in pt', () => {

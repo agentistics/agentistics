@@ -13,7 +13,8 @@ for (const lang of ['pt', 'en'] as const) {
 }
 
 test('calendar labels follow local dates across DST while elapsed durations stay absolute', () => {
-  const before = process.env.TZ
+  // Restore with a value, never `delete` (tzRestore.lint.test.ts).
+  const before = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   try {
     process.env.TZ = 'America/New_York'
     const now = Date.parse('2026-11-01T05:30:00Z')
@@ -22,7 +23,6 @@ test('calendar labels follow local dates across DST while elapsed durations stay
     expect(fmtWhen(after, now, 'en')).toBe(fmtWhen(now, now, 'en')) // repeated 01:30
     expect(fmtWhen(after + 86_400_000, now, 'en')).toContain('Mon')
   } finally {
-    if (before === undefined) delete process.env.TZ
-    else process.env.TZ = before
+    process.env.TZ = before
   }
 })

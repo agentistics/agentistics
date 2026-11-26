@@ -41,6 +41,7 @@
  * hand-editable file and a silently doubled bill is worse than no bill.
  */
 
+import { format } from 'date-fns'
 import type { HarnessId } from './types'
 import { HARNESS_ORDER } from './types'
 
@@ -155,11 +156,25 @@ export function dayFromIndex(index: number): BillingDay {
   return new Date(index * MS_PER_DAY).toISOString().slice(0, 10)
 }
 
-/** A millisecond timestamp → the UTC day it falls on. The same `slice(0, 10)` rule as everywhere
- *  else in this module. */
+/** A millisecond timestamp → the UTC day it falls on. */
 export function dayFromMs(ms: number): BillingDay | null {
   if (!Number.isFinite(ms)) return null
   const day = new Date(ms).toISOString().slice(0, 10)
+  return dayIndex(day) === null ? null : day
+}
+
+/**
+ * A millisecond timestamp → the day it falls on in the runtime's zone.
+ *
+ * The rule for anything compared with a day the person sees: a date filter runs from local
+ * midnight to local midnight, and `ApiCostByDay` is keyed by local activity day. Reading those
+ * instants as UTC adds a day to the window in every zone but UTC (the end west of it, the start
+ * east of it).
+ */
+export function localDayFromMs(ms: number): BillingDay | null {
+  const date = new Date(ms)
+  if (Number.isNaN(date.getTime())) return null
+  const day = format(date, 'yyyy-MM-dd')
   return dayIndex(day) === null ? null : day
 }
 
@@ -433,8 +448,8 @@ export function resolveWindow(args: {
   const todayIndex = dayIndex(today)
   if (dataStart === null || dataEnd === null || todayIndex === null) return null
 
-  const filterStartDay = dayFromMs(filterStartMs)
-  const filterEndDay = dayFromMs(filterEndMs)
+  const filterStartDay = localDayFromMs(filterStartMs)
+  const filterEndDay = localDayFromMs(filterEndMs)
   const filterStart = filterStartDay === null ? dataStart : (dayIndex(filterStartDay) as number)
   const filterEnd = filterEndDay === null ? dataEnd : (dayIndex(filterEndDay) as number)
 

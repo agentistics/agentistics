@@ -3,12 +3,13 @@ import { searchChatTurns } from '@agentistics/core'
 import { chatSearchMenu, chatSearchRow, excerptSegments } from './chatSearchRows'
 import { findTurnIndex, registerChatSearchTarget, requestChatSearch } from './chatSearchBridge'
 
-const NOW = Date.parse('2026-10-06T15:00:00Z')
+// LOCAL instants (no `Z`): "today" is the reader's calendar day, so UTC ones change day by zone.
+const NOW = Date.parse('2026-10-06T15:00:00')
 
 describe('chatSearchRow — one result as the panel draws it', () => {
   const page = searchChatTurns([
-    { role: 'user', text: 'Pode revisar a função de migração?', at: '2026-10-06T14:00:00Z' },
-    { role: 'assistant', text: 'Revisei a migracao; está ok.', at: '2026-09-20T10:00:00Z' },
+    { role: 'user', text: 'Pode revisar a função de migração?', at: '2026-10-06T14:00:00' },
+    { role: 'assistant', text: 'Revisei a migracao; está ok.', at: '2026-09-20T10:00:00' },
   ], 'migracao')
 
   // Newest POSITION first: hits[0] is the assistant's reply (index 1), hits[1] the question.
@@ -26,7 +27,7 @@ describe('chatSearchRow — one result as the panel draws it', () => {
   test('time today is the hour; another day carries the date', () => {
     const today = chatSearchRow(page.hits[1]!, 'claude', 'pt', NOW)
     const older = chatSearchRow(page.hits[0]!, 'claude', 'pt', NOW)
-    expect(today.time?.label).toMatch(/^\d{2}:\d{2}$/)
+    expect(today.time?.label).toBe('14:00')
     expect(older.time?.label).not.toMatch(/^\d{2}:\d{2}$/)
   })
 

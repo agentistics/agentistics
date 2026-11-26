@@ -2164,7 +2164,8 @@ describe('computeDerivedStats — date-filtered cost prices from the sessions\' 
   test('a no-daily session straddling midnight: start day is exact (and over-inclusive), next day still apportions', () => {
     const straddler: SessionMeta = {
       session_id: 'straddler', harness: 'claude', project_path: '/p', model: MODEL,
-      start_time: '2026-07-22T23:00:00.000Z', end_time: '2026-07-23T01:00:00.000Z',
+      // LOCAL instants (no `Z`): the start day is the local one, in whatever zone this runs.
+      start_time: '2026-07-22T23:00:00.000', end_time: '2026-07-23T01:00:00.000',
       // Its LIFETIME total — genuinely spans both days, but there is no `daily` to split it with.
       input_tokens: 1_707, output_tokens: 1_311_921,
       cache_read_input_tokens: 347_733_854, cache_creation_input_tokens: 38_684_456,
