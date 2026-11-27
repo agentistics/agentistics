@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Orçamento do mês: na última noite do mês, o valor dos planos continua sendo o do mês do seu calendário. Antes, das 21h à meia-noite no Brasil, já aparecia o do mês seguinte.',
+        en: 'Monthly budget: on the last night of a month, the plan commitment is still the one for the month on your calendar. Before, in the last hours of the day it could already show the next month.',
+      },
+      {
+        pt: 'Limites do plano: no dia da troca de plano, o nome mostrado segue a data do seu calendário.',
+        en: 'Plan limits: on the day you change plans, the plan name shown follows the date on your calendar.',
+      },
+    ],
+  },
   '2.229.7': {
     features: [],
     fixes: [
