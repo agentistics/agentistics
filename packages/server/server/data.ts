@@ -545,6 +545,9 @@ type CacheStatus = 'idle' | 'computing' | 'done'
 let _status: CacheStatus = 'idle'
 let _promise: Promise<ApiResponse> | null = null
 let _resolvedAt = 0
+/** When the last SUCCESSFUL build landed. Unlike `_resolvedAt`, `invalidateCache` never clears it: a change marks the
+ *  cache stale, it does not make the build any older. 0 = no build has landed yet. */
+let _builtAt = 0
 let _revalidating = false
 
 /** Read an already completed build without starting or waiting for a rebuild. */
@@ -675,7 +678,7 @@ export function dataGenerations(): { change: number; started: number; done: numb
 }
 function adoptBuild(result: ApiResponse): void {
   _promise = Promise.resolve(result)
-  _resolvedAt = Date.now()
+  _resolvedAt = _builtAt = Date.now()
   _doneGen = Math.max(_doneGen, BUILD_GEN.get(result) ?? 0)
 }
 /** One on-demand build shared by every reader that arrives while it runs. */
@@ -737,6 +740,21 @@ export async function buildApiResponse(): Promise<ApiResponse> {
  *  a Mac measured a 69 s build, and an agent's tool call must not sit for a minute. */
 export const FULL_READ_WAIT_MS = 5_000
 
+/**
+ * PERF.STORM-DATA-P95 — when a full build younger than `RECENT_BUILD_AGE_MS` exists, a full read waits at most
+ * `RECENT_READ_WAIT_MS` for the build that covers its changes, then answers that recent build (flagged `stale`) while
+ * the covering build keeps running. Under a rebuild storm every read lands on a dirty cache, and the wait was a build
+ * in flight that did not cover the change PLUS the on-demand build after it: on a slow runner one 1.3 s build made a
+ * reader wait 2.7 s (CI #1548, stormDataP95Ms 2758 against 500) while the same read took 62 ms on the same sha. A
+ * result a few seconds old costs the reader nothing it could notice; without a recent build the 5 s wait stands.
+ */
+export const RECENT_BUILD_AGE_MS = 10_000
+export const RECENT_READ_WAIT_MS = 250
+/** The wait a full read is given: shortened to `RECENT_READ_WAIT_MS` once a build younger than `RECENT_BUILD_AGE_MS` exists. */
+export function fullReadWaitMs(waitMs: number, builtAgeMs: number | null): number {
+  return builtAgeMs !== null && builtAgeMs >= 0 && builtAgeMs < RECENT_BUILD_AGE_MS ? Math.min(waitMs, RECENT_READ_WAIT_MS) : waitMs
+}
+
 /** A full read's answer: the data, and whether it is OLDER than a change the reader could have seen. */
 export interface BoundedRead { data: ApiResponse; stale: boolean; builtAt?: number }
 
@@ -750,6 +768,7 @@ const statusNow = (): CacheStatus => _status
 
 export async function buildApiResponseWithin(waitMs: number = FULL_READ_WAIT_MS): Promise<BoundedRead> {
   const need = _changeGen
+  waitMs = fullReadWaitMs(waitMs, _status === 'done' && _promise && _builtAt > 0 ? Date.now() - _builtAt : null)
   const deadline = Date.now() + waitMs
   if (_status === 'idle') void startFirstBuild().catch(() => undefined)
   if (_status === 'computing' && _promise) {
@@ -772,7 +791,7 @@ export async function buildApiResponseWithin(waitMs: number = FULL_READ_WAIT_MS)
     if (!fresh) {
       // The build that covers it keeps going (or is started now): the next read gets it.
       if (_doneGen < need && !(_inflight && _inflight.gen >= need)) void rebuildOnDemand().catch(() => undefined)
-      return { data: await _promise, stale: true, builtAt: _resolvedAt }
+      return { data: await _promise, stale: true, builtAt: _builtAt }
     }
     return { data: await _promise, stale: false }
   }
@@ -800,7 +819,7 @@ function startFirstBuild(): Promise<ApiResponse> {
   _promise = _buildApiResponseCore(_broadcastProgress)
     .then(result => {
       _status = 'done'
-      _resolvedAt = Date.now()
+      _resolvedAt = _builtAt = Date.now()
       _doneGen = Math.max(_doneGen, BUILD_GEN.get(result) ?? 0)
       _progressListeners.clear()
       onFreshBuild(result)
@@ -1169,6 +1188,7 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
   const gen = _changeGen
   _startedGen = Math.max(_startedGen, gen)
   _kickOnRead = false
+  if (_testBuildDelayMs > 0) await new Promise(r => setTimeout(r, _testBuildDelayMs))
   const timeoutMs = 300_000 // 5 minutes
 
   const buildPromise = async () => {
@@ -1522,6 +1542,10 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
   void done.finally(() => { if (_inflight === flight) _inflight = null }).catch(() => undefined)
   return done
 }
+
+let _testBuildDelayMs = 0
+/** Test seam: every build (first one included) takes this much longer, after stamping the generation it covers (a slow runner). */
+export function setBuildDelayForTest(ms: number): void { _testBuildDelayMs = ms }
 
 async function _buildApiResponse(): Promise<ApiResponse> {
   return _buildApiResponseCore(() => {})
