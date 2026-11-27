@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { HARNESS_ORDER, type AgentDayBaseline, type AgentManual, type AgentSchedule, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, type AccountAvailabilityState, type AgentDayBaseline,type AgentManual, type AgentSchedule, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
@@ -55,6 +55,12 @@ export interface HarnessAccount {
   agentManual?: AgentManual
   /** Stored. The weekly reading today's spend is measured from (local day). */
   agentDayBaseline?: AgentDayBaseline
+  /**
+   * Stored. The last availability-for-agents state the leader notice saw (CONTAS.AVISO-LIDER): what it
+   * was, since when, and when a leader was last told it became available. Persisted so a restart does
+   * not re-send. Written only by `checkAccountAvailability` (agent-schedule-host.ts).
+   */
+  agentAvailability?: AccountAvailabilityState
   firstSeen: number
   lastSeen: number
 }
@@ -80,6 +86,7 @@ export interface AccountPatch {
   /** `null` drops the legacy manual override (the migration's input). */
   agentManual?: AgentManual | null
   agentDayBaseline?: AgentDayBaseline
+  agentAvailability?: AccountAvailabilityState
 }
 export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
@@ -645,6 +652,7 @@ export function createHarnessAccounts(options: {
         else account.agentManual = patch.agentManual
       }
       if (patch.agentDayBaseline !== undefined) account.agentDayBaseline = patch.agentDayBaseline
+      if (patch.agentAvailability !== undefined) account.agentAvailability = patch.agentAvailability
       if (patch.nickname !== undefined) {
         const nickname = sanitizeNickname(patch.nickname)
         if (nickname) account.nickname = nickname
