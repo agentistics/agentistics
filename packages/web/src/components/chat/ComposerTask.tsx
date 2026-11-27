@@ -4,7 +4,7 @@ import { ClipboardList, Info, X } from 'lucide-react'
 import { PRIORITY_ORDER, type ComposerTaskOptions } from '@agentistics/core'
 import { ComposerIconButton } from './ComposerShell'
 import { ChipSelect } from '../tasks/ChipSelect'
-import { PRIORITY, surface } from '../tasks/board'
+import { PRIORITY, priorityLabel, surface } from '../tasks/board'
 import { DatePicker } from '../DatePicker'
 import { useEscapeOwner } from '../../lib/overlayStack'
 
@@ -85,7 +85,7 @@ export function ComposerTaskButton({ options, onChange, disabled, pt }: {
         <ComposerIconButton aria-label={pt ? 'Fechar' : 'Close'} onClick={closeAndFocus} style={{ marginLeft: 'auto' }}><X size={15} /></ComposerIconButton>
       </div>
       <label style={{ display: 'grid', gap: 6, fontSize: 12 }}>{pt ? 'Prioridade' : 'Priority'}
-        <ChipSelect value={options.priority} title={pt ? 'Prioridade' : 'Priority'} options={PRIORITY_ORDER.map(id => ({ value: id, ...PRIORITY[id]! }))}
+        <ChipSelect value={options.priority} options={PRIORITY_ORDER.map(id => ({ value: id, ...PRIORITY[id]!, label: priorityLabel(id, pt ? 'pt' : 'en') }))}
           onPick={priority => onChange({ ...options, priority: priority as ComposerTaskOptions['priority'] })} />
       </label>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
