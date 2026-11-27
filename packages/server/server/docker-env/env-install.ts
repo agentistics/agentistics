@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { EGRESS_MAX_ALLOW } from './egress-policy'
 import { startEgressProxy } from './egress-proxy'
-import { imageForProfile } from './env-profile'
+import { imageForProfile, PROFILE_REL } from './env-profile'
 import { createVolume, ensureImage, ensureVolumes, identify, liveMemory, makeCtx, memoryAdmission, readMem, removeOwnVolume, runCommand, verifyMarker, workspaceSlots, worktreeOf, type Ctx, type DockerRunInput } from './docker-run'
 import { dockerDir, emptySession, readLedger, withLedger } from './ledger'
 import { nmSubdirs } from './plans'
@@ -47,7 +47,7 @@ function ensureCache(c: Ctx, manager: string): { ok: true; name: string } | { ok
 export async function envInstall(i: Omit<DockerRunInput, 'command' | 'ttlSec'> & { ttlSec?: number }): Promise<{ code: number; message: string }> {
   const log = i.log ?? ((s: string) => console.error(s))
   const { root, gitDirInTree } = worktreeOf(i.cwd)
-  const profileText = (() => { try { return readFileSync(join(root, '.agentistics', 'env.yml'), 'utf8') } catch { return null } })()
+  const profileText = (() => { try { return readFileSync(join(root, PROFILE_REL), 'utf8') } catch { return null } })()
   const prof = imageForProfile(profileText)
   if (!prof.ok) return { code: 2, message: `${prof.reason}; the Docker install is not available for this project` }
   const manager = prof.profile.manager ?? prof.image.managers[0]!

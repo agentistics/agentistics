@@ -19,7 +19,7 @@ import type { EnvImage } from '@agentistics/core'
 import { buildCreateArgv, type ContainerPlan, type MountSpec } from './docker-argv'
 import { docker, dockerAttached, parseJson, DockerRefusal } from './docker-cli'
 import { containerEnv, envFileText } from './container-env'
-import { imageForProfile } from './env-profile'
+import { imageForProfile, PROFILE_REL } from './env-profile'
 import { containerProblems, imageProblems, nmWritableRefusal } from './inspect-check'
 import { admissionRefusal, dockerDir, emptySession, installId, newAttemptId, readLedger, withLedger, type SessionEntry, type VolumeRecord } from './ledger'
 import { maskMounts, MASK_TEXT_LIMIT, type WorktreeEntry } from './masks'
@@ -325,7 +325,7 @@ export function makeCtx(dataDir: string, env: Record<string, string | undefined>
 export async function runInDocker(i: DockerRunInput): Promise<DockerRunOutcome> {
   const log = i.log ?? ((s: string) => console.error(s))
   const { root, gitDirInTree } = worktreeOf(i.cwd)
-  const profileText = (() => { try { return readFileSync(join(root, '.agentistics', 'env.yml'), 'utf8') } catch { return null } })()
+  const profileText = (() => { try { return readFileSync(join(root, PROFILE_REL), 'utf8') } catch { return null } })()
   const prof = imageForProfile(profileText)
   if (!prof.ok) return { ran: false, fallback: true, reason: `${prof.reason}. This run uses the isolated namespace.` }
   const who = identify(i)

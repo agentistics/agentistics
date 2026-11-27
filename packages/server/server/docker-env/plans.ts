@@ -10,6 +10,9 @@
  * `nm` is writable ONLY in the install containers; everywhere else it is mounted read-only (and `inspect`
  * re-checks it). The download container sees the worktree read-only and no `scratch`: no repo code runs there.
  */
+/** The identity marker at a volume's ROOT (commands only mount sub-paths, so repo code never reaches it). */
+export const VOLUME_MARKER = '/v/.agentistics-volume'
+
 import { OPT_DIR, type ContainerKind, type ContainerPlan, type MountSpec } from './docker-argv'
 
 export interface NmSlot { key: string; /** relative dir of the package that owns this node_modules ('' = root) */ rel: string }
@@ -83,7 +86,7 @@ export function containerPlan(i: PlanInput): ContainerPlan {
 export function initPlan(i: { name: string; image: string; volume: string; subdirs: readonly string[]; uid: number; gid: number; marker: string; envFile: string; labels: Record<string, string>; optDir: string; memoryBytes: number }): ContainerPlan {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
   const dirs = i.subdirs.map(d => q(`/v/${d}`)).join(' ')
-  const script = `set -e; mkdir -p ${dirs}; printf %s ${q(i.marker)} > /v/.agentistics-volume; chmod 600 /v/.agentistics-volume; chown -R ${i.uid}:${i.gid} ${dirs}`
+  const script = `set -e; mkdir -p ${dirs}; printf %s ${q(i.marker)} > ${VOLUME_MARKER}; chmod 600 ${VOLUME_MARKER}; chown -R ${i.uid}:${i.gid} ${dirs}`
   return {
     kind: 'init', name: i.name, image: i.image, user: { uid: 0, gid: 0 }, memoryBytes: i.memoryBytes, workdir: '/',
     envFile: i.envFile, labels: i.labels, capAdd: 'CHOWN', ttlSec: 60, argv: ['sh', '-c', script],
@@ -91,11 +94,11 @@ export function initPlan(i: { name: string; image: string; volume: string; subdi
   }
 }
 
-/** A read-only look at a volume root (marker check): `cat /v/.agentistics-volume`. */
+/** A read-only look at a volume root (the marker check). */
 export function readMarkerPlan(i: { name: string; image: string; volume: string; envFile: string; labels: Record<string, string>; optDir: string; memoryBytes: number }): ContainerPlan {
   return {
     kind: 'read', name: i.name, image: i.image, user: { uid: 0, gid: 0 }, memoryBytes: i.memoryBytes, workdir: '/',
-    envFile: i.envFile, labels: i.labels, ttlSec: 30, argv: ['cat', '/v/.agentistics-volume'],
+    envFile: i.envFile, labels: i.labels, ttlSec: 30, argv: ['cat', VOLUME_MARKER],
     mounts: [{ type: 'volume', source: i.volume, target: '/v', readonly: true }, { type: 'bind', source: i.optDir, target: OPT_DIR, readonly: true }],
   }
 }

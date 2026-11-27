@@ -11,6 +11,9 @@
  */
 import { ENV_IMAGES, resolveEnvImage, type EnvImage } from '@agentistics/core'
 
+/** Where a repo keeps its profile, relative to the worktree root (repo content, NOT agentop's data dir). */
+export const PROFILE_REL = '.agentistics/env.yml'
+
 export interface EnvProfile {
   image?: string
   manager?: string
