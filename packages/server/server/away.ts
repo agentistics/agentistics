@@ -287,7 +287,8 @@ export function awaySessionRows(
   ]
 }
 
-async function liveRows(): Promise<AwaySessionRow[]> {
+/** The running managed rows (registry + fleet), as the away notice reads them. Reused by the account-available leader notice. */
+export async function liveRows(): Promise<AwaySessionRow[]> {
   const { readRegistry } = await import('./sessions/registry')
   const { hostForFleet } = await import('./sessions/fleet-web')
   const host = await hostForFleet('en')

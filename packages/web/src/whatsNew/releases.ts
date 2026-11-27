@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.0': {
+    features: [
+      {
+        pt: 'Contas: quando uma conta volta a ficar disponível para agentes (abre a janela da agenda, você liga a conta ou o sobrescrito, refaz o login, ou o limite de 5 h/semana renova), as sessões líderes recebem um aviso uma vez só. A agenda continua valendo: conta ligada fora do horário, sem o sobrescrito, não gera aviso.',
+        en: 'Accounts: when an account becomes available to agents again (its schedule window opens, you switch the account or the override on, you sign in again, or the 5 h/weekly limit renews), the leader sessions get one notice. The schedule still applies: an account switched on outside its hours, without the override, sends no notice.',
+      },
+    ],
+    fixes: [],
+  },
   '2.229.10': {
     features: [],
     fixes: [
