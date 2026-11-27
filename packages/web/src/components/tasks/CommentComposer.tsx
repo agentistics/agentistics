@@ -19,6 +19,7 @@ import type { ChatAttachmentRef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { appendDictation } from '../../lib/dictation'
+import { flushDictationIntoDraft } from '../../lib/dictationSend'
 import { attachmentKind, isImageAttachment } from '../../lib/messageAttachments'
 import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle, fitComposerField } from '../chat/ComposerShell'
 import { AttachmentLightbox } from '../sessions/AttachmentLightbox'
@@ -108,8 +109,36 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
     }
   }
 
-  const canSend = !busy && !uploading && (value.trim() !== '' || attachments.length > 0)
-  const send = () => { if (canSend) { dictation.stop(); onSubmit() } }
+  // Words still being heard count as something to send: they are what the person just said.
+  const canSend = !busy && !uploading && (value.trim() !== '' || attachments.length > 0 || dictation.heard.trim() !== '')
+  /**
+   * SENDING WHILE DICTATING SENDS WHAT WAS SAID. The recogniser is stopped (not aborted) and what it
+   * had not settled on yet comes back from `finish()` (`dictationFinish.ts`); it is appended to the
+   * field and the submit runs on the render that carries it, because `onSubmit` reads the parent's
+   * state. A second press while that is in flight is ignored — it would send the text without the tail.
+   */
+  const finishing = useRef(false)
+  const submitOnValue = useRef(false)
+  const onSubmitRef = useRef(onSubmit)
+  onSubmitRef.current = onSubmit
+  useEffect(() => {
+    if (!submitOnValue.current) return
+    submitOnValue.current = false
+    onSubmitRef.current()
+  }, [value])
+  const send = async () => {
+    if (!canSend || finishing.current) return
+    if (!dictation.listening) { onSubmit(); return }
+    const flushed = await flushDictationIntoDraft(finishing, {
+      finish: dictation.finish,
+      readDraft: () => valueRef.current,
+      // The submit runs on the render that carries the new value (see the effect above).
+      writeDraft: next => { submitOnValue.current = true; onChange(next) },
+    })
+    if (flushed.changed) return
+    if (flushed.draft.trim() === '' && attachedRef.current.length === 0) return
+    onSubmitRef.current()
+  }
   const images = attachments.filter(a => isImageAttachment(a.path)).map(a => a.path)
   const [lightbox, setLightbox] = useState<number | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -215,7 +244,7 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
               if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(pickIndex); return }
             }
             // Same rule as the session composer: Enter breaks the line on a phone, sends elsewhere.
-            if (e.key === 'Enter' && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
+            if (e.key === 'Enter' && !e.shiftKey && !isMobile && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
           }}
           style={{ ...composerFieldStyle, color: 'var(--text-primary)', minHeight: 36, maxHeight: 220 }}
         />
@@ -236,7 +265,7 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
           )}
           <span style={{ flex: 1 }} />
           <ComposerSendButton
-            onClick={send}
+            onClick={() => void send()}
             disabled={!canSend}
             sending={busy}
             active={canSend}

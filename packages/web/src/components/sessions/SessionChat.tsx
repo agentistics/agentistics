@@ -70,6 +70,8 @@ import { artifactsFromTurns, hasUnlistedWrites, type Artifact } from '../../lib/
 import type { LiveTurn } from '../../lib/artifactTabs'
 import { MAX_ATTACHMENTS, attachmentRoom, planPaste } from '../../lib/pastePlan'
 import { appendDictation, dictationError, dictationLocale, dictationSupport, insecureAlternative, splitDictation } from '../../lib/dictation'
+import { finishDictation, type FinishableRecognition } from '../../lib/dictationFinish'
+import { flushDictationIntoDraft } from '../../lib/dictationSend'
 import { modelSwitchLine, modelSwitchReason } from '../../lib/modelSwitch'
 import {
   applySkill, emptyPickerReason, filterSkills, flattenGroups, groupSkills, slashMisplaced,
@@ -483,6 +485,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * broken, which is exactly what was reported.
    */
   const [heard, setHeard] = useState('')
+  /** `heard` for code that runs outside a render (the send, after an await). */
+  const heardRef = useRef('')
+  /** The draft as last rendered — the send reads it AFTER waiting on the recogniser. */
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  /** A send is waiting on the recogniser to settle what it heard; a second press must not send without it. */
+  const flushingRef = useRef(false)
   /**
    * THIS DRAFT HOLDS DICTATED TEXT — set when the recogniser settles on words, cleared when the
    * message goes or the draft is emptied. The send then tells the model the message was transcribed
@@ -491,7 +500,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const dictatedRef = useRef(false)
   // A draft emptied by hand no longer holds anything dictated.
   useEffect(() => { if (draft === '') dictatedRef.current = false }, [draft])
-  const recognitionRef = useRef<{ stop: () => void; abort?: () => void; onresult: unknown } | null>(null)
+  const recognitionRef = useRef<FinishableRecognition | null>(null)
   const dictation = useMemo(
     () => dictationSupport(typeof window === 'undefined' ? undefined : (window as never), pt ? 'pt' : 'en'),
     [pt],
@@ -547,15 +556,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         const { final, interim } = splitDictation(e)
         // Only the settled half is kept. The rest is shown and thrown away on the next event.
         if (final !== '') { dictatedRef.current = true; editDraft(d => appendDictation(d, final)) }
+        heardRef.current = interim
         setHeard(interim)
       }
       // Both end the same way. A recogniser that stopped on its own (a timeout, a denied
       // permission) must not leave the button lit — a control that says it is listening when it
       // is not is worse than one that never started.
-      rec.onend = () => { setListening(false); setHeard(''); recognitionRef.current = null }
+      rec.onend = () => { setListening(false); setHeard(''); heardRef.current = ''; recognitionRef.current = null }
       rec.onerror = e => {
         setListening(false)
         setHeard('')
+        heardRef.current = ''
         recognitionRef.current = null
         // The REASON reaches the screen. This handler used to discard its event, so a refused
         // permission, an unreachable recognition service, a missing microphone and a moment of
@@ -574,23 +585,26 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [listening, pt])
 
   /**
-   * SENDING ENDS THE DICTATION.
+   * SENDING ENDS THE DICTATION — AND SENDS WHAT WAS SAID.
    *
-   * The microphone used to stay on after a send, so it went on listening into a composer that had
-   * just been emptied: the tail of a sentence still being recognised landed in the NEXT draft, and
-   * the tab's microphone indicator stayed lit for a message already delivered. What was said up to
-   * the send is what was sent — so the recogniser is detached FIRST (a result arriving on the way
-   * down would otherwise be appended to the fresh draft) and then aborted, which, unlike `stop`,
-   * discards whatever it had not settled on yet. Pressing the microphone again starts a new one.
+   * The microphone used to stay on after a send (the tail of a sentence landed in the NEXT draft),
+   * and the fix for that ABORTED the recogniser, which discards what it had not settled on yet. In
+   * continuous mode that is routinely most of what was said — Chrome settles a phrase only at a
+   * pause — so pressing Send mid-sentence deleted the sentence (owner, 2026-11-27). Now it is
+   * STOPPED, its last results are collected instead of written into the draft, and the text comes
+   * back here (`dictationFinish.ts`, bounded wait); every handler is detached when it resolves, so
+   * nothing arriving later can re-fill the box or touch the next draft. Resolves `''` when nothing
+   * is listening.
    */
-  const endDictationForSend = useCallback(() => {
+  const endDictationForSend = useCallback(async (): Promise<string> => {
     const rec = recognitionRef.current
-    if (!rec) return
-    rec.onresult = null
+    if (!rec) return ''
     recognitionRef.current = null
-    try { (rec.abort ?? rec.stop).call(rec) } catch { /* already ended */ }
+    const pending = heardRef.current
     setListening(false)
     setHeard('')
+    heardRef.current = ''
+    return finishDictation(rec, pending)
   }, [])
 
   // A click anywhere else closes the model menu. Requiring a second click on the button is the
@@ -2256,7 +2270,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     attachments: attached.length,
   })
   /** What the send button could send. The same predicate decides its label, its colour and `stopShown`. */
-  const somethingToSend = hasSomethingToSend({ draft: stripQuotedLines(ownText), attachments: attached.length })
+  // Words still being heard count: pressing Send mid-sentence sends them (see `endDictationForSend`).
+  const somethingToSend = hasSomethingToSend({ draft: stripQuotedLines(ownText), attachments: attached.length }) || heard.trim() !== ''
   const [stopping, setStopping] = useState(false)
   async function stopNow() {
     if (!stopEnabled || stopping) return
@@ -2463,6 +2478,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }
 
   async function send() {
+    // A send already waiting on the recogniser owns this message; a second press would send it without the tail.
+    if (flushingRef.current) return
     // A trailing `@server:` is the picker's scaffolding and was never typed — it must not be sent.
     // `#` chips become their lean reference HERE, so the harness never sees a raw `#` — which Claude
     // Code would read as a memory note when it opens the message. See `sessionMention.ts`.
@@ -2474,7 +2491,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
     // about what may be DELIVERED, not about what may be typed.
-    if (ownWords === '' && attached.length === 0) return
+    // Words still being heard ARE something to send — they are what the person just said.
+    if (ownWords === '' && attached.length === 0 && heardRef.current.trim() === '') return
     // The previous message is still on its way: SAY so and keep the draft — returning in silence is a key that looks broken.
     if (sending) { setNotice(pt ? 'A mensagem anterior ainda está sendo enviada — a sua continua aqui; envie de novo em instantes.' : 'The previous message is still being sent — yours is kept here; send again in a moment.'); return }
     /**
@@ -2496,8 +2514,20 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           : 'This session is not taking messages right now. If it has stopped, use Reopen.'))
       return
     }
-    // The message is going out: the microphone stops with it — see `endDictationForSend`.
-    endDictationForSend()
+    // The message is going out: the microphone stops with it, and what it heard goes WITH the
+    // message — see `endDictationForSend`. The tail is written into the field first, so a refusal or
+    // a failed send below leaves it there rather than losing it.
+    let draftNow = draft
+    if (recognitionRef.current) {
+      const flushed = await flushDictationIntoDraft(flushingRef, {
+        finish: endDictationForSend,
+        readDraft: () => draftRef.current,
+        writeDraft: next => { dictatedRef.current = true; editDraft(next) },
+      })
+      draftNow = flushed.draft
+      if (stripQuotedLines(toFields(replyTo, draftNow).fields.join('\n')).trim() === '' && attached.length === 0) return
+    }
+    const sendFields = draftNow === draft ? fields : toFields(replyTo, draftNow)
     // Paths first, on their own lines, then what was typed — the assistant reads the files it is
     // pointed at, and burying the paths inside a sentence makes them easy to miss.
     // Quote first, then the paths, then what was typed. The quote is trimmed to a few lines: a
@@ -2507,7 +2537,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // the person's own words render inside the grey bar as if the session had said them. The paths
     // LEAD, which is where `splitMessage` reads them back.
     let composed = serializeFields(
-      { quotes: fields.quotes, fields: fields.fields.map(dropEmptyAtTrigger) },
+      { quotes: sendFields.quotes, fields: sendFields.fields.map(dropEmptyAtTrigger) },
       attached.map(a => a.path),
       t => expandSessionMentions(t, pt),
     )
@@ -2552,7 +2582,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
      * The one thing a person must never lose is what they wrote, and an optimistic clear that
      * cannot undo itself is how that happens.
      */
-    const restore = { draft, attached, replyTo }
+    const restore = { draft: draftNow, attached, replyTo }
     const taskRequest: ReturnType<typeof composerTask.take> = answeringNow ? {} : composerTask.take(full)
     setSending(true)
     setTaskSendError(null)

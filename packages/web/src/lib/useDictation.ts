@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { dictationError, dictationLocale, dictationSupport, splitDictation } from './dictation'
+import { finishDictation } from './dictationFinish'
 
 type Recognition = {
   lang: string; continuous: boolean; interimResults: boolean
@@ -26,6 +27,7 @@ export function useDictation(lang: 'en' | 'pt', onText: (settled: string) => voi
   )
   const [listening, setListening] = useState(false)
   const [heard, setHeard] = useState('')
+  const heardRef = useRef('')
   const [error, setError] = useState<string | null>(null)
   const ref = useRef<Recognition | null>(null)
   const onTextRef = useRef(onText)
@@ -37,7 +39,21 @@ export function useDictation(lang: 'en' | 'pt', onText: (settled: string) => voi
     rec.onresult = null
     ref.current = null
     try { (rec.abort ?? rec.stop).call(rec) } catch { /* already ended */ }
-    setListening(false); setHeard('')
+    setListening(false); setHeard(''); heardRef.current = ''
+  }, [])
+
+  /**
+   * Sending while listening: stop the recogniser and resolve with what it had NOT yet handed to
+   * `onText` — the interim guess plus anything it settles on the way down (`dictationFinish.ts`).
+   * Resolves `''` when nothing is listening. The caller appends it and sends.
+   */
+  const finish = useCallback(async (): Promise<string> => {
+    const rec = ref.current
+    if (!rec) return ''
+    ref.current = null
+    const pending = heardRef.current
+    setListening(false); setHeard(''); heardRef.current = ''
+    return finishDictation(rec, pending)
   }, [])
 
   const toggle = useCallback(() => {
@@ -53,9 +69,10 @@ export function useDictation(lang: 'en' | 'pt', onText: (settled: string) => voi
       rec.onresult = e => {
         const { final, interim } = splitDictation(e)
         if (final !== '') onTextRef.current(final)
+        heardRef.current = interim
         setHeard(interim)
       }
-      const done = () => { setListening(false); setHeard(''); ref.current = null }
+      const done = () => { setListening(false); setHeard(''); heardRef.current = ''; ref.current = null }
       rec.onend = done
       rec.onerror = e => { done(); const why = dictationError(e?.error ?? 'unknown', lang); if (why) setError(why) }
       setError(null)
@@ -68,5 +85,5 @@ export function useDictation(lang: 'en' | 'pt', onText: (settled: string) => voi
   }, [lang])
 
   useEffect(() => stop, [stop])
-  return { support, listening, heard, error, toggle, stop }
+  return { support, listening, heard, error, toggle, stop, finish }
 }

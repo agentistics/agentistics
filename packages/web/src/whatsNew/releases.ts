@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ditado: apertar Enviar (ou Enter) enquanto você ainda fala não apaga mais o que foi dito. O microfone para, termina de transcrever e a mensagem sai inteira, uma vez só. Vale para o chat das sessões e para os comentários do Agentask.',
+        en: 'Dictation: pressing Send (or Enter) while you are still speaking no longer deletes what you said. The microphone stops, finishes transcribing and the whole message goes out, once. This applies to the session chat and to Agentask comments.',
+      },
+    ],
+  },
   '2.230.5': {
     features: [],
     fixes: [
