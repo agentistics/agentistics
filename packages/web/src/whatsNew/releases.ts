@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Cobrança: ao escolher um plano para uma conta nova, ele passa a valer desde o dia local em que a conta apareceu, e não mais desde o dia seguinte para quem usa à noite no Brasil.',
+        en: 'Billing: picking a plan for a new account now starts it on the local day the account first appeared, instead of the next day for people working in the evening in Brazil.',
+      },
+      {
+        pt: 'No seletor de datas da cobrança, "hoje" é o seu dia local: no Japão de manhã cedo já dá para escolher hoje, e no Brasil à noite não dá mais para escolher amanhã.',
+        en: 'In the billing date picker, "today" is your local day: in Japan early in the morning you can now pick today, and in Brazil in the evening you can no longer pick tomorrow.',
+      },
+    ],
+  },
   '2.229.8': {
     features: [],
     fixes: [
