@@ -272,7 +272,13 @@ export interface SessionDayUsage {
   output_tokens: number
   cache_read_input_tokens: number
   cache_creation_input_tokens: number
-  /** Messages of BOTH roles, matching `dailyActivity.messageCount`. */
+  /**
+   * Messages of BOTH roles on this day, counted exactly as the lifetime `user_message_count` +
+   * `assistant_message_count` are (a person's turn, plus each assistant line) — so the days add up
+   * to the lifetime figure. Tool results and harness-injected entries are NOT messages (until
+   * 2026-11-27 they were, and the days summed to 153 % of lifetime; old stored records are
+   * apportioned back on read, see `daily-messages-repair.ts`).
+   */
   messages: number
   /**
    * WHEN, on this day: hour of the LOCAL clock -> how many of `message_hours`' entries fell in it.

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile, utimes, stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { openParseCache } from './parse-cache'
-import { cachedParseSession, cachedEnrich } from './parse-cache-jsonl'
+import { cachedParseSession, cachedEnrich, localTimeZone } from './parse-cache-jsonl'
 import {
   parseSessionJsonl, activeMinutesFromClaudeJsonl, contextTokensFromClaudeJsonl,
   compactsFromClaudeJsonl, skillUsesFromClaudeJsonl,
@@ -140,6 +140,26 @@ describe('cachedParseSession', () => {
     expect(fresh.compact_count).toBe(0)
     expect(fresh.compact_ms).toBe(0)
     expect(fresh.skill_uses).toEqual({})
+    cache.close()
+  })
+})
+
+describe('cachedParseSession — v9 shape', () => {
+  test('a row cached under the v8 shape (inflated daily messages) is never served', async () => {
+    // v9 re-means `daily[day].messages` (tool results no longer count). A closed conversation's
+    // transcript never changes, so only the SESSION_SHAPE bump makes the v8 row unreachable.
+    const { dir, file } = await fixture()
+    const cache = await openParseCache(join(dir, 'cache.db'))
+    const st = await stat(file)
+    const stamp = { path: file, mtimeMs: st.mtimeMs, size: st.size }
+    const real = await parseSessionJsonl(file, 'sess-1', '/fallback', 'jsonl')
+    const day = Object.keys(real.daily ?? {})[0]!
+    const old = { ...real, daily: { ...real.daily, [day]: { ...real.daily![day]!, messages: 999 } } }
+    cache.set('session', stamp, old, `v8:${localTimeZone()}:jsonl`)
+
+    const fresh = await cachedParseSession(cache, file, 'sess-1', '/fallback', 'jsonl')
+    expect(fresh.daily![day]!.messages).toBe(real.daily![day]!.messages)
+    expect(fresh.daily![day]!.messages).not.toBe(999)
     cache.close()
   })
 })

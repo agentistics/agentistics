@@ -64,7 +64,7 @@ describe('session-meta over a synthetic multi-model, multi-tool, subagent sessio
   test('what the turn events cannot reach stays absent, each reason naming the fact or the decision', () => {
     const facts: Record<string, string> = {
       message_hours: 'decision D25',
-      daily: 'every user- and assistant-role LINE',
+      daily: 'a person\'s turn plus each assistant line',
     }
     for (const [f, fact] of Object.entries(facts)) {
       expect(f in PROJ.meta).toBe(false)
