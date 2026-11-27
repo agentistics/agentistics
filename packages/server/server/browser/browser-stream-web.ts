@@ -94,6 +94,7 @@ export function browserScreencastHub(opts: BrowserWebOpts): ScreencastHub {
         ack: (n) => { void cdp.send('Page.screencastFrameAck', { sessionId: n }, sid).catch(() => {}) },
         resize: v => cast.resize(v),
         viewport: () => cast.current(),
+        sharp: () => cast.sharp(),
         stop: async () => { off(); await cast.stop().catch(() => {}) },
       }
     },
