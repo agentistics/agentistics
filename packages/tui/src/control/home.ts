@@ -8,6 +8,7 @@
  * source cannot produce, with the sentence that says why.
  */
 import { isLiveState, sessionCostUSD, sessionTokenTotal, type SessionMeta } from '@agentistics/core'
+import { needsOwner } from '@agentistics/core'
 import type { ControlSession, SessionState } from './types'
 
 // ── layout ────────────────────────────────────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ export function providerTone(state: ProviderState): 'running' | 'danger' | 'mute
 /** Sessions on this machine other than the one being worked in, and how many wait on a person. */
 export function machineLine(fleet: readonly ControlSession[]): { others: number; need: number } {
   const others = fleet.filter(f => f.state !== 'closed').length
-  const need = fleet.filter(f => f.state === 'waiting-approval' || f.state === 'waiting').length
+  const need = fleet.filter(needsOwner).length
   return { others, need }
 }
 

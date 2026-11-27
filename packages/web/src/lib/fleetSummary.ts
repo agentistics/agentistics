@@ -9,7 +9,7 @@
  */
 
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import { isLiveState } from '@agentistics/core'
+import { isLiveState, needsOwner } from '@agentistics/core'
 
 export interface HarnessSlice {
   harness: string
@@ -50,8 +50,6 @@ export interface FleetSummary {
   projectRepos: number
 }
 
-const WAITING = new Set(['waiting', 'waiting-approval'])
-
 export function summarizeFleet(rows: readonly ControlSession[], now: number): FleetSummary {
   const byHarness = new Map<string, HarnessSlice>()
   const projects = new Set<string>()
@@ -66,7 +64,7 @@ export function summarizeFleet(rows: readonly ControlSession[], now: number): Fl
   for (const s of rows) {
     const isRunning = isLiveState(s.state)
     if (isRunning) running++
-    if (WAITING.has(s.state)) waiting++
+    if (needsOwner(s)) waiting++
     if (s.project) {
       // The GROUP is the key on both sets, so a worktree and its main checkout stay one project on
       // both counts — keying the repo set differently would let the card read "2 of 1".

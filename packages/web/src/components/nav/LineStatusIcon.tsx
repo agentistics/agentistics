@@ -12,6 +12,7 @@
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Users } from 'lucide-react'
 import { LINE_STATUS_COLOR, type LineStatusKind } from '../../lib/lineStatus'
 
 /** The prototype's glyphs (viewBox 18×18), one per kind. */
@@ -28,6 +29,8 @@ function glyph(kind: LineStatusKind): ReactNode {
     case 'approval':
     case 'you':
       return <><path d="M3 4.5a2 2 0 012-2h8a2 2 0 012 2v6a2 2 0 01-2 2H8l-3.5 3v-3H5a2 2 0 01-2-2z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /><circle cx="9" cy="7.5" r="1.2" fill="currentColor" /></>
+    case 'workers':
+      return <Users x={1} y={1} width={16} height={16} aria-hidden />
     case 'fell':
       return <><circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" strokeWidth="1.8" /><path d="M7 6v6M11 6v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></>
     case 'ended':

@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma sessão que colocou workers para trabalhar e terminou a vez não aparece mais como "precisa de você": agora ela diz "esperando 2 workers", com um ícone próprio, e não entra no sino, nos avisos nem nos contadores. Volta a esperar você quando o último worker parar, ou quando houver uma pergunta ou aprovação.',
+        en: 'A session that put workers to work and ended its turn no longer shows as "needs you": it now says "waiting on 2 workers", with its own icon, and is left out of the bell, notifications and counters. It waits on you again once the last worker stops, or when a question or approval is pending.',
+      },
+      {
+        pt: 'Isso também vale para líderes de líderes: quem espera uma sessão que espera os próprios workers também aparece como "esperando workers", e o filtro "esperando" da lista de sessões deixa essas sessões de fora.',
+        en: 'This also holds for leaders of leaders: a session waiting on one that waits on its own workers also shows as "waiting on workers", and the session list\'s "waiting" filter leaves these sessions out.',
+      },
+    ],
+  },
   '2.230.1': {
     features: [],
     fixes: [

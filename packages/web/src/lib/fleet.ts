@@ -88,6 +88,8 @@ export interface FleetRow {
   project: string
   state: 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'exited' | 'lost' | 'unknown' | 'closed'
   stateLabel: string
+  /** Busy workers this finished turn waits on — see `ControlSession.waitingOnWorkers`. */
+  waitingOnWorkers?: number
   /** Why the row is not idle — the one activity reading (`@agentistics/core` sessionActivity). */
   activeSignal?: import("@agentistics/core").ActivitySignal
   actionable: boolean

@@ -53,6 +53,8 @@ export interface FleetRow {
   project: string
   state: SessionState
   stateLabel: string
+  /** Busy workers a finished turn waits on: not waiting on a person. */
+  waitingOnWorkers?: number
   actionable: boolean
   task?: string
   note?: string

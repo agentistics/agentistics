@@ -15,7 +15,7 @@
  * session belongs to which team or which section.
  */
 
-import type { ActivitySignal } from '@agentistics/core'
+import { needsOwner, type ActivitySignal } from '@agentistics/core'
 import type { SessionState } from '@agentistics/tui/control/session-fleet'
 
 export type AsideTab = 'active' | 'groups' | 'ended'
@@ -39,12 +39,14 @@ export interface TeamRow {
   /** Why the row is not idle (an open tool call, a background task…). See `sessionActivity.ts`. */
   activeSignal?: ActivitySignal
   activeSinceAt?: number
+  /** A finished turn waiting on its workers: not waiting on a person (`needsOwner`). */
+  waitingOnWorkers?: number
 }
 
 const LIVE: ReadonlySet<SessionState> = new Set<SessionState>(['working', 'waiting', 'waiting-approval', 'idle', 'unknown'])
 
 export function isLive(state: SessionState): boolean { return LIVE.has(state) }
-export function isWaitingState(state: SessionState): boolean { return state === 'waiting' || state === 'waiting-approval' }
+export function isWaitingRow(row: Pick<TeamRow, 'state' | 'waitingOnWorkers'>): boolean { return needsOwner(row) }
 
 export interface Team<R> {
   /** The leader's identity key — what a fold is stored under, so it survives a reopen. */
@@ -91,7 +93,7 @@ export function buildTeams<R extends TeamRow>(rows: readonly R[], o: {
 /** "3 na equipe · 1 esperando você" — the folded leader row's summary. */
 export function teamSummary(members: readonly TeamRow[], pt: boolean): string {
   const n = members.length
-  const w = members.filter(m => isWaitingState(m.state)).length
+  const w = members.filter(isWaitingRow).length
   const head = pt ? `${n} na equipe` : `${n} in the team`
   return w ? `${head} · ${pt ? `${w} esperando você` : `${w} waiting on you`}` : head
 }
@@ -112,14 +114,14 @@ export function autoUnfold<R extends TeamRow>(
   const open = new Set<string>()
   for (const t of teams) {
     if (!folded.includes(t.key)) continue
-    if (t.members.some(m => isWaitingState(m.state) && !wasWaiting.has(m.id))) open.add(t.key)
+    if (t.members.some(m => isWaitingRow(m) && !wasWaiting.has(m.id))) open.add(t.key)
   }
   return open.size === 0 ? folded : folded.filter(k => !open.has(k))
 }
 
 /** The ids of every row waiting on a person right now — what `autoUnfold` compares against next poll. */
 export function waitingIds(rows: readonly TeamRow[]): Set<string> {
-  return new Set(rows.filter(r => isWaitingState(r.state)).map(r => r.id))
+  return new Set(rows.filter(isWaitingRow).map(r => r.id))
 }
 
 /** Same calendar day on the local clock — "finished TODAY" is the reader's today. */

@@ -48,6 +48,7 @@
 // TYPE-only, deliberately: `types.ts` imports the two default VALUES below, and a value cycle
 // between them would be a real one. Types are erased, so this direction costs nothing and keeps the
 // default arrangement derived from the vocabulary rather than spelled out a second time beside it.
+import { ownerState } from '@agentistics/core'
 import { recencyOf } from './session-order'
 import type { ControlSession, SessionState, SessionViewPrefs } from './types'
 
@@ -229,7 +230,8 @@ export const SESSION_DIMENSIONS: Record<SessionDimensionId, SessionDimension> = 
   // Collapsing the WORDS left three menu rows all reading `desligada` — which is worse than three
   // different words, because now the list offers one choice three times and nothing on screen says
   // why. The bucket has to collapse, not just its label.
-  status: { id: 'status', keyOf: s => statusKey(s.state) },
+  // `ownerState`: a turn waiting on its workers must not sit under "needs you".
+  status: { id: 'status', keyOf: s => statusKey(ownerState(s)) },
   // `''` is what the registry records for a session whose harness it has forgotten, and that is an
   // absence rather than a harness called nothing.
   harness: { id: 'harness', keyOf: s => s.harness || undefined },

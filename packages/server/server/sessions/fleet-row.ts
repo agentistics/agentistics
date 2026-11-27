@@ -221,6 +221,8 @@ export interface FleetRow {
   project: string
   state: ControlSession['state']
   stateLabel: string
+  /** Busy workers this finished turn waits on — see `ControlSession.waitingOnWorkers`. */
+  waitingOnWorkers?: number
   /** Why the row is not idle — the one activity reading (`@agentistics/core` sessionActivity). */
   activeSignal?: import("@agentistics/core").ActivitySignal
   /** True for a row agentop hosts. An `external`/`closed` row carries no activity and no verbs. */
@@ -363,6 +365,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     project: row.project,
     state: row.state,
     stateLabel: row.stateLabel,
+    ...(row.waitingOnWorkers ? { waitingOnWorkers: row.waitingOnWorkers } : {}),
     ...(row.activeSignal ? { activeSignal: row.activeSignal } : {}),
     actionable: row.actionable,
     ...(row.fell ? { fell: true } : {}),

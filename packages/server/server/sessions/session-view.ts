@@ -9,7 +9,7 @@
  */
 
 import { resolveSessionAccount, type AccountRegistryView } from './session-account'
-import { activityApplies, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
+import { activeEvidence, activityApplies, busyChildCounts, isWaitingOnWorkers, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
 import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
@@ -70,6 +70,11 @@ export interface SessionView {
    * a harness that cannot tell its own turn apart — see `backgroundWork`.
    */
   background?: boolean
+  /**
+   * How many of the workers this session started are busy while its own turn is over
+   * (`withWaitingOnWorkers`). A finished turn carrying it is not the owner's to answer.
+   */
+  waitingOnWorkers?: number
   /**
    * The last few meaningful lines of this session's screen — what it is saying right now.
    *
@@ -306,7 +311,40 @@ function rankOf(v: SessionView): number {
   // push a session that is waiting on someone further down the screen.
   if (v.status === 'closed') return 6
   if (v.status === 'external') return 5
+  // Waiting on its own workers is not waiting on someone: it sorts with the working ones.
+  if (v.activity === 'waiting' && v.waitingOnWorkers) return RANK.working!
   return RANK[v.activity ?? ''] ?? 4
+}
+
+/** Alive and doing something: the turn is running, or it is at its prompt with a command, a background
+ *  task or a queued heavy job — the very reading the row's own state icon draws (`activeEvidence`). */
+function busyWorker(v: SessionView): boolean {
+  if (v.status !== 'running' && v.status !== 'unregistered') return false
+  if (v.activity === 'working') return true
+  if (v.activity !== 'waiting') return false
+  return activeEvidence({ turns: v.chatTurns ?? [], ...(v.heavyLock ? { heavyLock: v.heavyLock } : {}), ...(v.outputMoved ? { outputMoved: true } : {}) }) !== null
+}
+
+/**
+ * Mark each live session whose turn ended while workers it started are still busy (`busyChildCounts`).
+ * Only `waiting` is marked: a dialog (`waiting-approval`) is the owner's whatever the workers do.
+ */
+export function withWaitingOnWorkers(views: readonly SessionView[]): SessionView[] {
+  const counts = busyChildCounts(views.map(v => ({
+    id: v.id,
+    conversationId: v.conversationId,
+    parentSessionId: v.parentSessionId,
+    parentConversationId: v.parentConversationId,
+    busy: busyWorker(v),
+    // A sub-leader at its prompt waiting on ITS workers is busy for the leader above it.
+    canWait: v.activity === 'waiting' && (v.status === 'running' || v.status === 'unregistered'),
+  })))
+  return views.map(v => {
+    const n = counts.get(v.id)
+    return n && v.activity === 'waiting' && (v.status === 'running' || v.status === 'unregistered')
+      ? { ...v, waitingOnWorkers: n }
+      : v
+  })
 }
 
 /**
@@ -1099,7 +1137,7 @@ export function buildSessionViews(o: {
   // Retired predecessors are dropped LAST, so everything above — the external-twin dedup and the
   // closed-history cover set — still reasons over the full managed list. Only the final rows the
   // reader sees lose the superseded duplicates; the registry itself is untouched.
-  return [...collapseSupersededSessions(managed), ...external, ...closed].sort((a, b) => {
+  return [...withWaitingOnWorkers(collapseSupersededSessions(managed)), ...external, ...closed].sort((a, b) => {
     const byRank = rankOf(a) - rankOf(b)
     if (byRank !== 0) return byRank
     return (b.createdMs ?? 0) - (a.createdMs ?? 0)
@@ -1108,7 +1146,12 @@ export function buildSessionViews(o: {
 
 export function attentionCount(views: readonly SessionView[]): number {
   // An external row's activity is shown, never counted: nobody asked agentop to watch it, so it is no one's alert.
-  return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v)).length
+  return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v) && !waitingOnItsWorkers(v)).length
+}
+
+/** A finished turn that waits on its workers (`withWaitingOnWorkers`): no one's alert. */
+export function waitingOnItsWorkers(v: Pick<SessionView, 'activity' | 'waitingOnWorkers'>): boolean {
+  return isWaitingOnWorkers({ state: v.activity ?? '', waitingOnWorkers: v.waitingOnWorkers })
 }
 
 /**
@@ -1134,7 +1177,7 @@ export function bellTransitions(
 ): string[] {
   const out: string[] = []
   for (const v of next) {
-    if (v.status === 'external' || !needsAttention(v.activity) || declaredIdle(v)) continue
+    if (v.status === 'external' || !needsAttention(v.activity) || declaredIdle(v) || waitingOnItsWorkers(v)) continue
     const before = prev.get(v.id)
     if (before === v.activity) continue
     out.push(v.id)

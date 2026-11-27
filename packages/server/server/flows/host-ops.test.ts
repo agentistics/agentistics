@@ -151,6 +151,16 @@ test('stopped streak: working in between resets it (waiting→working→waiting 
   expect(judgeStopped('s1', poll(16_000, 'working'))).toMatchObject({ refused: true })
   expect(judgeStopped('s1', poll(31_000))).toMatchObject({ refused: true })
 })
+test('stopped streak: a leader waiting on its workers is never stopped, and it breaks the streak', () => {
+  resetStoppedStreaks()
+  const lead = (at: number, waitingOnWorkers?: number) =>
+    ({ polledAtMs: at, sessions: [{ id: 's1', status: 'running', activity: 'waiting', ...(waitingOnWorkers ? { waitingOnWorkers } : {}) }] })
+  expect(judgeStopped('s1', lead(1_000, 2))).toMatchObject({ refused: true, reason: 'session is not confirmed stopped' })
+  expect(judgeStopped('s1', lead(16_000, 1))).toMatchObject({ refused: true, reason: 'session is not confirmed stopped' })
+  // The last worker stops: only then do two waiting polls confirm it.
+  expect(judgeStopped('s1', lead(31_000))).toMatchObject({ refused: true })
+  expect(judgeStopped('s1', lead(46_000))).toMatchObject({ ok: true, polls: 2 })
+})
 test('stopped streak: a stale earlier poll does not count as a confirmation', () => {
   resetStoppedStreaks()
   judgeStopped('s1', poll(1_000))
