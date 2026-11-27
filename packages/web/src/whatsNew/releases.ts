@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.10': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Filtro de datas na visão geral: conversas do Codex, OpenCode e outros assistentes agora contam só os tokens, o custo e as mensagens do período escolhido. Antes entravam por inteiro, com tudo o que já tinham gasto.',
+        en: 'Date filter on the overall view: Codex, OpenCode and other assistant conversations now count only the tokens, cost and messages of the chosen period. Before, they came in whole, with everything they had ever spent.',
+      },
+    ],
+  },
   '2.229.9': {
     features: [],
     fixes: [

@@ -1396,7 +1396,7 @@ export function computeDerivedStats(
     )
 
     /**
-     * Shared date predicate — reused for filteredSessions and nonClaudeInRange.
+     * Shared date predicate behind filteredSessions (and so behind nonClaudeInRange).
      *
      * A SESSION IS FILED ON THE DAY IT STARTED, and an OVERLAP rule was tried here and REVERTED.
      *
@@ -1538,8 +1538,11 @@ export function computeDerivedStats(
     // Non-Claude sessions in the active date range — used to supplement statsCache totals
     // in the unified view (no harness filter). When a harness filter is active OR there are
     // no non-Claude sessions, this is always empty so all addenda contribute +0.
+    // Taken from `filteredSessions`, so each one is already CUT to the range: the whole session here
+    // put a lifetime of tokens, cost and messages under a heading that said "today". Every reader
+    // below runs in the unfiltered branches only, where no other filter narrows that list.
     const nonClaudeInRange = !harnessActive
-      ? harnessSessions.filter(s => (s.harness ?? 'claude') !== 'claude' && inDateRange(s))
+      ? filteredSessions.filter(s => (s.harness ?? 'claude') !== 'claude')
       : []
 
     // Extend dailyActivity with sessions on days not yet in statsCache
