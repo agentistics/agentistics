@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Navegador interno: em telas de alta densidade, a página parada aparece nítida. Antes a imagem era capturada menor e esticada, o que deixava texto e imagens borrados.',
+        en: 'Built-in browser: on high-density screens, a still page now looks sharp. The picture used to be captured smaller and stretched, which blurred text and images.',
+      },
+      {
+        pt: 'Navegador interno: enquanto a página se mexe, as imagens continuam leves; meio segundo depois que ela para, chega uma imagem de alta qualidade no lugar da última.',
+        en: 'Built-in browser: while the page moves, frames stay light; half a second after it stops, a high-quality picture replaces the last one.',
+      },
+    ],
+  },
   '2.230.2': {
     features: [],
     fixes: [
