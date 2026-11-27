@@ -4,9 +4,9 @@
  * exit code dropping EVERY external session, and `~/.local/bin` read as an installation only under `/home`.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { scanMacProcesses, type MacRun } from './macos-processes-io'
+import { resetMacNotHarnessMemo, scanMacProcesses, type MacRun } from './macos-processes-io'
 import { parsePsCommands } from './macos-processes'
-import { installedHarnessAt, resetSharedScan, sharedScanOf } from './live-sessions'
+import { installedHarnessAt, resetSharedScan, SCAN_SHARE_MAX_MS, scanShareWindowMs, scanSummaryLine, sharedScanOf } from './live-sessions'
 
 const OPENCODE = '/Users/dev/.opencode/bin/opencode'
 
@@ -33,6 +33,7 @@ function fakeMac(o: { lsofExit?: number; extraNodes?: number } = {}) {
 }
 
 describe('scanMacProcesses', () => {
+  afterEach(() => resetMacNotHarnessMemo())
   test('an lsof that exits 1 (one pid had no such descriptor) still yields the sessions it printed', async () => {
     const { run } = fakeMac({ lsofExit: 1 })
     const r = await scanMacProcesses(Date.now(), run)
@@ -44,6 +45,51 @@ describe('scanMacProcesses', () => {
     await scanMacProcesses(Date.now(), run)
     expect(calls.filter(c => c[0] === 'ps').length).toBe(2) // the bulk list + one argv batch
     expect(calls.filter(c => c[0] === 'lsof').length).toBeLessThanOrEqual(3)
+  })
+  test('PERF.SERVIDOR-OCIOSO: 600 processes, 60 node and no harness — the warm sweep is ONE ps, lsof never runs', async () => {
+    const memo = new Map() as import('./macos-processes-io').MacNotHarnessMemo
+    let ps = 0
+    const calls: string[][] = []
+    const table = (extra: string[] = []) => [
+      ...Array.from({ length: 540 }, (_, i) => `  ${100 + i} 01:00:00 /usr/libexec/d${i}`),
+      ...Array.from({ length: 60 }, (_, i) => `  ${1000 + i} 02:00:00 /opt/homebrew/bin/node`),
+      ...extra,
+    ].join('\n')
+    let extra: string[] = []
+    const run: MacRun = async argv => {
+      calls.push(argv)
+      if (argv[1] === '-axwwo') { ps++; return { ok: true, stdout: table(extra) } }
+      if (argv[0] === 'ps') {
+        const pids = argv[argv.length - 1]!.split(',')
+        return { ok: true, stdout: pids.map(p => p === '2000' ? `  ${p} ${OPENCODE}` : `  ${p} node /Applications/Code.app/helper.js`).join('\n') }
+      }
+      if (argv.includes('cwd')) return { ok: true, stdout: 'p2000\nfcwd\nn/Users/dev/ws' }
+      if (argv.includes('0')) return { ok: true, stdout: 'p2000\nf0\nn/dev/ttys001' }
+      return { ok: true, stdout: '' }
+    }
+    const now = Date.now()
+    await scanMacProcesses(now, run, memo)
+    const first = calls.length
+    expect(first).toBe(2) // bulk + one argv batch; no lsof for 60 non-harness nodes
+    expect(calls.some(c => c[0] === 'lsof')).toBe(false)
+    calls.length = 0
+    await scanMacProcesses(now, run, memo)
+    expect(calls).toEqual([['ps', '-axwwo', 'pid=,etime=,comm=']]) // warm: one ps
+    // a NEW node that IS a harness: one argv read for it alone, lsof for it alone
+    calls.length = 0
+    extra = [`  2000 00:05 ${OPENCODE}`]
+    const r = await scanMacProcesses(now, run, memo)
+    expect(r.procs.map(p => [p.pid, p.harness, p.cwd])).toEqual([[2000, 'opencode', '/Users/dev/ws']])
+    expect(calls.filter(c => c[0] === 'ps' && c[1] === '-ww').map(c => c[c.length - 1])).toEqual(['2000'])
+    expect(calls.filter(c => c[0] === 'lsof').every(c => c[c.indexOf('-p') + 1] === '2000')).toBe(true)
+    // a recycled pid (another start) is asked again
+    calls.length = 0
+    extra = []
+    const recycled = table().replace('  1000 02:00:00 /opt/homebrew/bin/node', '  1000 00:03 /opt/homebrew/bin/node')
+    const run2: MacRun = async (argv, t) => (argv[1] === '-axwwo' ? { ok: true, stdout: recycled } : run(argv, t))
+    await scanMacProcesses(now, run2, memo)
+    expect(calls.filter(c => c[0] === 'ps' && c[1] === '-ww').map(c => c[c.length - 1])).toEqual(['1000'])
+    expect(ps).toBe(3)
   })
   test('the sweep never blocks: a slow lsof leaves the event loop free', async () => {
     const { run: fast } = fakeMac()
@@ -79,6 +125,27 @@ describe('sharedScanOf', () => {
     const c = sharedScanOf(async () => { runs++; return { procs: [], unavailable: null } }, t0 + 10_000)
     await c
     expect(runs).toBe(2)
+  })
+  test('PERF.SERVIDOR-OCIOSO: a slow sweep keeps answering for twice its length after it ends (1 s floor, 15 s ceiling)', () => {
+    expect(scanShareWindowMs(25)).toBe(1_000) // Linux: unchanged
+    expect(scanShareWindowMs(6_000)).toBe(12_000) // a 6 s lsof sweep is not started again for 12 s
+    expect(scanShareWindowMs(39_000)).toBe(SCAN_SHARE_MAX_MS)
+    expect(scanShareWindowMs(-5)).toBe(1_000)
+  })
+  test('a fast finished sweep is reused inside 1 s and redone after it; reasons are counted', async () => {
+    let runs = 0
+    const scan = async () => { runs++; return { procs: [], unavailable: null } }
+    const t0 = Date.now()
+    await sharedScanOf(scan, t0, 'fleet')
+    await sharedScanOf(scan, t0 + 500, 'data')
+    expect(runs).toBe(1)
+    await sharedScanOf(scan, t0 + 1_500, 'memory')
+    expect(runs).toBe(2)
+  })
+  test('the summary line names count, time, processes, harnesses, children and who asked; silent when nothing ran', () => {
+    const s = { sinceMs: 0, scans: 4, shared: 9, totalMs: 8_000, maxMs: 6_000, procs: 612, harness: 0, children: 16, byReason: { fleet: 3, data: 1 } }
+    expect(scanSummaryLine(s, 10 * 60_000)).toBe('[live-sessions] process sweeps in 10 min: 4 run (9 shared), avg 2000 ms, max 6000 ms, last 612 processes / 0 harness, 16 child processes; asked by fleet=3 data=1')
+    expect(scanSummaryLine({ ...s, scans: 0 }, 60_000)).toBeNull()
   })
 })
 

@@ -25,7 +25,8 @@ import {
   EDGES, GATES, adoptPhase, gatesFor, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, releaseUnknown, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
+import { capacityPrint, slotNeedsCheck, type SlotMemoEntry } from './queue-slot-memo'
+import { DEFAULT_RELEASE_REPO, FIVE_HOUR_CEILING, MIN_FREE_BYTES, WEEK_CEILING, findMergedPr, judgePredispatch, stagedAccount, releaseFailed, releaseUnknown, runGate, type BlockedSubtaskFact, type BudgetFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { MERGE_PHASES, MERGE_SCAN_PER_TICK, currentNote, mergeScanDue, mergeScanOrder, planReviewNudges, type ReconcileEntry } from './ciclo'
 import { AUTO_RUN_GH_BUDGET, ENGINE_REPO, MANUAL_RUN_GH_BUDGET, PROOF_REFRESH_MS, findEnginePinTag, findPublicTag, hydrateProofCache, loadBatchPrs, matchBatchPr, meterFacts, serializeProofCache, type AutoRunReport, type BatchMatch, type BatchPr, type DeclaredHead, type ProofCache } from './batch-proof'
 import { antigaComment, inReconcileScope, isAntiga, type AntigaAction } from './antigas'
@@ -1152,6 +1153,8 @@ export function createDeliveryService(deps: DeliveryDeps) {
       role: 'worker', alive: true, cwd: '', worktree: false,
     }))
 
+  /** PERF.SERVIDOR-OCIOSO: per piece, the capacity print of its last "no slot" verdict (`queue-slot-memo.ts`). */
+  const noSlotMemo = new Map<string, SlotMemoEntry>()
   const slotWith = async (rec: DeliveryRecord, phantoms: SessionFact[]): Promise<GateVerdict> => {
     const real = phantoms.length ? { ...d.facts, sessions: async () => [...await d.facts.sessions(), ...phantoms] } : d.facts
     return runGate('vaga', rec, real)
@@ -1290,13 +1293,30 @@ export function createDeliveryService(deps: DeliveryDeps) {
     if (fresh.candidates.length === 0) return { actions }
     const phantoms = phantomsOf(items)
     const asked = new Set<string>()
+    let env: Promise<[number | null, BudgetFact[]]> | undefined
+    const topCaps = new Map<string, number>()
     for (const it of fresh.candidates) {
       try {
         if (asked.has(it.taskId)) continue
         if (!judgePredispatch(it.sub).ok) continue
+        // Same capacity, same piece, same machine and plan facts, same "no slot" a moment ago: not asked, not rewritten,
+        // not logged again. The env facts are read once per tick (memory, budgets) and once per harness (top cap).
+        const st = it.sub.staged
+        env ??= Promise.all([d.facts.memoryBytes().catch(() => null), d.facts.budgets().catch(() => [])])
+        const [memoryBytes, budgets] = await env
+        const capOf = st?.harness ?? ''
+        if (!topCaps.has(capOf)) topCaps.set(capOf, await d.facts.topCap(capOf).catch(() => -1))
+        const print = capacityPrint(sessions, phantoms.map(x => x.id), {
+          revision: it.rec.revision, ...(st?.harness ? { harness: st.harness } : {}), ...(st?.account ? { account: st.account } : {}), ...(st?.model ? { model: st.model } : {}),
+        }, { memoryBytes, budgets, topCap: topCaps.get(capOf)!, rule: {
+          minFreeBytes: MIN_FREE_BYTES, fiveHourCeiling: FIVE_HOUR_CEILING, weekCeiling: WEEK_CEILING,
+          account: st?.harness ? stagedAccount({ harness: st.harness, ...(st.account ? { account: st.account } : {}) }) : undefined,
+        } })
+        if (!slotNeedsCheck(noSlotMemo.get(it.subtaskId), print, now)) continue
         const verdict = await slotWith(it.rec, phantoms)
         await storeSlot(it.subtaskId, verdict)
-        if (!verdict.ok) { actions.push(`fila-sem-vaga ${it.subtaskId}`); continue }
+        if (!verdict.ok) { noSlotMemo.set(it.subtaskId, { print, atMs: now }); actions.push(`fila-sem-vaga ${it.subtaskId}`); continue }
+        noSlotMemo.delete(it.subtaskId)
         const leader = liveLeader(it, sessions)
         const claimed = await d.store.update(x => {
           const c = x.deliveries[it.subtaskId]

@@ -172,6 +172,36 @@ export function analyzeOpencodeV2Status(status: OpencodeV2Status | null, now: nu
   })
 }
 
+/**
+ * PERF.SERVIDOR-OCIOSO — the health checks at most once a minute in the server, never on the build's critical path
+ * after the first: a result younger than `HEALTH_TTL_MS` is reused, an older one is returned AND refreshed in the
+ * background (one refresh at a time). They read the vault state, the guard files, list the projects directory and a
+ * sample transcript; on a Mac under swap the build's `read` phase measured 61 s and these ran in it on every build.
+ */
+export const HEALTH_TTL_MS = 60_000
+/** The largest transcript the timestamp check reads (it reads 30 lines of it). */
+const SAMPLE_MAX_BYTES = 2 * 1024 * 1024
+let _health: { at: number; issues: Promise<HealthIssue[]> } | null = null
+let _healthRefreshing = false
+export function runHealthChecksCached(nowMs: number = Date.now(), run: () => Promise<HealthIssue[]> = runHealthChecks): Promise<HealthIssue[]> {
+  if (!_health) {
+    const issues = run()
+    _health = { at: nowMs, issues }
+    issues.catch(() => { if (_health?.issues === issues) _health = null })
+    return issues
+  }
+  if (nowMs - _health.at >= HEALTH_TTL_MS && !_healthRefreshing) {
+    _healthRefreshing = true
+    const prev = _health.issues
+    void run().then(issues => { _health = { at: Date.now(), issues: Promise.resolve(issues) } }, () => undefined)
+      .finally(() => { _healthRefreshing = false })
+    return prev
+  }
+  return _health.issues
+}
+/** Test seam. */
+export function resetHealthCache(): void { _health = null; _healthRefreshing = false }
+
 export async function runHealthChecks(): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = []
   analyzeOpencodeV2Status(opencodeV2Status(), Date.now(), issues)
@@ -237,13 +267,15 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
       const projectDirs = await safeReadDir(PROJECTS_DIR)
       let totalJsonl = 0
       let sampleJsonlPath: string | null = null
+      let sampleTries = 0
 
       for (const dir of projectDirs) {
         const entries = await safeReadDir(join(PROJECTS_DIR, dir))
         for (const entry of entries) {
           if (entry.endsWith('.jsonl')) {
             totalJsonl++
-            if (!sampleJsonlPath) sampleJsonlPath = join(PROJECTS_DIR, dir, entry)
+            // PERF.SERVIDOR-OCIOSO: the sample is read WHOLE, so it is a small one — a live transcript can be tens of MB.
+            if (!sampleJsonlPath && sampleTries++ < 20 && ((await safeStat(join(PROJECTS_DIR, dir, entry)))?.size ?? Infinity) <= SAMPLE_MAX_BYTES) sampleJsonlPath = join(PROJECTS_DIR, dir, entry)
           }
         }
         if (totalJsonl >= 5 && sampleJsonlPath) break

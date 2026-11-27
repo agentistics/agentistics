@@ -1596,7 +1596,7 @@ let sessionsPoller: SessionsPoller | null = null
  */
 export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeof createSessionsPoller>[0] {
   return {
-    backend, readRegistry, scanProcesses, loadConversations, touchSessions,
+    backend, readRegistry, scanProcesses: () => scanProcesses('fleet'), loadConversations, touchSessions,
     ...(isServerProcess() ? { initialSessionLimit: INITIAL_SESSION_LIMIT } : {}),
     // A worker that ended frees a slot: the queue looks at its next piece now (FILA.PRIORIDADE), not a minute from now.
     endSessions: async (ids, endedAt) => {

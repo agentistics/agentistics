@@ -841,6 +841,11 @@ export interface AppData {
    *  arrives without this flag. Absent on every full answer. */
   partial?: boolean
   partialReason?: 'quick' | 'snapshot' | 'slim'
+  /** A FULL `/api/data` read that waited the bound (5 s) for the build holding every change it could have seen and
+   *  answered the previous build instead (`staleBuiltAt` = when that one finished). The build keeps running; the next
+   *  read gets it. Absent on every answer that is current. */
+  stale?: boolean
+  staleBuiltAt?: string
   /** Project paths whose git facts were slower than the build's soft deadline; their numbers follow
    *  in a later build. Absent when every project answered in time. */
   deferredRepos?: string[]

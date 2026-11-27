@@ -7,12 +7,13 @@
 
 import { planDueBackfill } from './task-estimated-due'
 import { estimateUnstartedAtMs } from './task-live'
-import { TASKS_FILE } from '../config'
+import { MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
+import { safeStat } from '../utils'
 import { ensureStatusStages } from './status-stage-sync'
 import { loadConsolidated } from '../consolidate'
 import { readPreferences } from '../preferences'
 import { readRegistry } from './registry'
-import { createTaskStore, type TaskStore } from './task-store'
+import { createTaskStore, onBookWrite, type TaskStore } from './task-store'
 import { migrateLegacyTasks, type TaskBook } from './task-model'
 import { historicalRows } from './task-historical'
 import { nativeRows } from './task-native'
@@ -213,6 +214,37 @@ export async function loadTaskBoard(): Promise<{
   // No metas here (see this function's note): the rows carry the FILING, which is all these callers read.
   return { store, book, registryRows, rollupRows: [...registryRows, ...historicalRows(book.historicalSessions)] }
 }
+
+/**
+ * PERF.SERVIDOR-OCIOSO fase 3 (QA C1) — the board for the DELIVERY flow's facts, read once per change of what it is
+ * read from. The minute tick asked `facts.subtask` / `pieceStatus` / `queueExtras` per queued piece, `queueItems()`
+ * up to three times, and each answer was a whole `loadTaskWorld()` — registry, the six seeding passes over the book AND
+ * the consolidate store (5 000 records) none of those facts read: measured 62 ms of CPU per call on a real copy, ~21
+ * calls a minute. They read the BOOK only, so this is `loadTaskBoard()` (no consolidate store), kept while the book
+ * file and the registry file are the same bytes (inode, size, mtime — the book store's own memo key) and dropped on any
+ * in-process book write. A change by another process moves a stamp and is read on the next call: never stale.
+ */
+type TaskBoard = Awaited<ReturnType<typeof loadTaskBoard>>
+let _boardMemo: { stamp: string; board: Promise<TaskBoard> } | null = null
+let _boardLoads = 0
+onBookWrite(() => { _boardMemo = null })
+async function fileStamp(path: string): Promise<string> {
+  const st = await safeStat(path)
+  return st ? `${st.ino}:${st.size}:${st.mtimeMs}` : 'absent'
+}
+export async function loadTaskBoardShared(): Promise<TaskBoard> {
+  const [book, registry] = await Promise.all([fileStamp(TASKS_FILE), fileStamp(MANAGED_SESSIONS_FILE)])
+  const stamp = `${book}|${registry}`
+  if (_boardMemo && _boardMemo.stamp === stamp) return _boardMemo.board
+  _boardLoads++
+  const board = loadTaskBoard()
+  const memo = { stamp, board }
+  _boardMemo = memo
+  board.catch(() => { if (_boardMemo === memo) _boardMemo = null })
+  return board
+}
+/** Test seam: how many times `loadTaskBoardShared` really loaded. */
+export function taskBoardLoads(): number { return _boardLoads }
 
 export async function loadTaskWorld(): Promise<TaskWorld> {
   const store = openTaskStore()

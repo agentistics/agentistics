@@ -12,7 +12,7 @@
 
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 import { resolveContextWindow, sessionCostUSD, sessionLabel } from '@agentistics/core'
-import { loadConsolidated } from '../consolidate'
+import { loadConsolidated, storeChangeStamp } from '../consolidate'
 import { sessionAtCwd } from '../live-sessions'
 import { SPAWN_SPECS } from './spawn-spec'
 import { readRegistry } from './registry'
@@ -123,8 +123,14 @@ function indexOf(pool: readonly Pick<Conversation, 'sessionId' | 'nativeId'>[]):
   return index
 }
 
+/** Used only in a process that never wrote the store (the cockpit, the CLI): there a timer is all there is. */
 const CACHE_TTL_MS = 30_000
-let cache: { at: number; list: Conversation[] } | null = null
+/** With a stamp, the cache follows the store; this is the safety net for a change nothing stamped. */
+const STAMPED_TTL_MS = 10 * 60_000
+let cache: { at: number; stamp: string | null; list: Conversation[] } | null = null
+let storeReads = 0
+/** Test seam: how many times `loadConversations` re-read the whole store. */
+export function conversationStoreReads(): number { return storeReads }
 
 /** Epoch ms of the last thing that happened in a conversation. */
 function lastActivityOf(s: SessionMeta): number {
@@ -195,9 +201,14 @@ export function toConversation(s: SessionMeta): Conversation {
  *  a screen with no history, not a screen that fails to open. */
 export async function loadConversations(): Promise<Conversation[]> {
   const now = Date.now()
-  if (cache && now - cache.at < CACHE_TTL_MS) {
+  // PERF.SERVIDOR-OCIOSO fase 3 (QA C2): re-read when the store CHANGED (the build stamps it), not every 30 s.
+  const stamp = storeChangeStamp()
+  if (cache && now >= cache.at && (stamp !== null && cache.stamp === stamp
+    ? now - cache.at < STAMPED_TTL_MS
+    : stamp === null && cache.stamp === null && now - cache.at < CACHE_TTL_MS)) {
     return refreshConversationContexts(cache.list, await readRegistry())
   }
+  storeReads++
   let list: Conversation[]
   try {
     list = [...(await loadConsolidated()).values()]
@@ -207,7 +218,7 @@ export async function loadConversations(): Promise<Conversation[]> {
   } catch {
     list = []
   }
-  cache = { at: now, list }
+  cache = { at: now, stamp, list }
   return refreshConversationContexts(list, await readRegistry())
 }
 
