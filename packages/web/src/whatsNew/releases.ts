@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O número de mensagens do Claude Code deixa de sair inflado: os resultados de ferramentas eram contados como mensagens. Em todas as visões, inclusive sem filtro de datas, Mensagens e Tool calls caem (cerca de 20 a 35 %, conforme o período) e agora batem com o que as conversas realmente têm.',
+        en: 'The Claude Code message count is no longer inflated: tool results were being counted as messages. In every view, including with no date filter, Messages and Tool calls go down (roughly 20 to 35 %, depending on the period) and now match what the conversations actually hold.',
+      },
+    ],
+  },
   '2.230.4': {
     features: [],
     fixes: [

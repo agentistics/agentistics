@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile, stat } from 'fs/promises'
 import type { SessionMeta, HarnessId } from '@agentistics/core'
 import { CONSOLIDATED_DIR } from './config'
 import { createLimiter, safeReadDir, safeReadJson } from './utils'
+import { repairDailyMessages } from './daily-messages-repair'
 import { HARNESS_ORDER, migrateAgentMetrics, normalizeSessionTimes, coerceSessionLists } from '@agentistics/core'
 
 let coldReadStarted = false
@@ -133,7 +134,10 @@ async function readRecordFile(path: string, stamp: string | null): Promise<Sessi
   if (!read?.session_id) { if (stamp) lastLoaded.set(path, { stamp, value: null }); return null }
   // Same reasoning for the list fields: a record holding `languages: {}` crashed every
   // dashboard that rendered it. See sessionShape.ts.
-  const s = coerceSessionLists(read)
+  // A record written before the parser stopped counting tool results as messages on their day
+  // (2026-11-27) is apportioned back to its lifetime counters — most such records have no
+  // transcript left to re-read. Idempotent; see daily-messages-repair.ts.
+  const s = repairDailyMessages(coerceSessionLists(read))
   if (!s.harness) s.harness = 'claude'
   // The store holds whatever an adapter wrote, including shapes it should not have written —
   // Kimi persisted `start_time` as an epoch number, and every consumer that calls a string
