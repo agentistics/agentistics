@@ -6,7 +6,7 @@
  * the SCREEN says about an account's plan and when to ask "which plan is this?".
  */
 import {
-  accountProfileKey, accountProfileOf, dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
+  accountProfileKey, accountProfileOf, dayFromIndex, dayIndex, findPlan, localDayFromMs, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
   type BillingDetection, type BillingPeriod, type BillingSettings, type HarnessId, type PlanLimits,
 } from '@agentistics/core'
 import type { PeriodDraft } from './billingForm'
@@ -93,7 +93,7 @@ export function planDraftWrites(draft: PeriodDraft, opened: PeriodDraft | null):
 }
 
 const dayOf = (ms: number | undefined, fallback: string): string =>
-  ms && Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : fallback
+  ms && Number.isFinite(ms) ? (localDayFromMs(ms) ?? fallback) : fallback
 
 /** A period from a catalog pick, starting the day the account was first seen. `null` when the entry
  *  needs more than a pick (a typed name or price) — the caller opens the editor instead. */
