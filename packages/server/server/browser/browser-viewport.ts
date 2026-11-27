@@ -1,4 +1,4 @@
-import { SCREENCAST_PARAMS } from './browser-screencast'
+import { QUALITY_STILL, SCREENCAST_PARAMS } from './browser-screencast'
 
 export interface ViewerViewport { width: number; height: number; deviceScaleFactor: number }
 
@@ -39,6 +39,36 @@ export function clampViewport(v: ViewerViewport): ViewerViewport | null {
   return { width, height, deviceScaleFactor: Math.max(1, Math.min(3, v.deviceScaleFactor)) }
 }
 
+/** The longer side of a captured frame, in physical pixels (NAVEGADOR.FLUIDEZ-NITIDEZ): sharp on a 2x screen, bounded in bytes and memory. */
+export const MAX_CAPTURE_EDGE = 2560
+
+export interface CastPlan {
+  /** `Emulation.setDeviceMetricsOverride`: the page's CSS size and the scale it RENDERS at. */
+  metrics: ViewerViewport
+  /** `Page.startScreencast` bounds: the physical pixels the frame is drawn on, capped. */
+  capture: { maxWidth: number; maxHeight: number }
+}
+
+/**
+ * The surface -> what Chromium renders and captures. The frame is captured at the PHYSICAL pixels it will be shown
+ * on (the page contained in the surface x devicePixelRatio, never below the page's CSS width), capped at `MAX_CAPTURE_EDGE`, and the page renders at
+ * exactly the scale that capture needs: a dense 1240-CSS panel gets a 2170-px frame instead of a 1240-px one
+ * upscaled 1.75x (the blur the owner saw), and a 390px phone showing a 1024 page renders at ~1.14x instead of 3x.
+ */
+export function castPlan(v: ViewerViewport): CastPlan | null {
+  const page = clampViewport(v)
+  if (!page) return null
+  const fit = Math.min(v.width / page.width, v.height / page.height)
+  const shown = page.width * fit * page.deviceScaleFactor
+  const edgeCap = Math.min(MAX_CAPTURE_EDGE, MAX_CAPTURE_EDGE * page.width / page.height)
+  // Never below the page's own CSS width: Chromium's screencast downscale is cruder than the browser's (measured
+  // PSNR 25,6 against 35,7 dB on a 390px card), and the client scales the frame down anyway.
+  const maxWidth = Math.round(Math.min(edgeCap, Math.max(page.width, Math.min(page.width * page.deviceScaleFactor, shown))))
+  const maxHeight = Math.min(Math.round(maxWidth * page.height / page.width), MAX_CAPTURE_EDGE)
+  const scale = Math.max(1, Math.round((maxWidth / page.width) * 100) / 100)
+  return { metrics: { width: page.width, height: page.height, deviceScaleFactor: scale }, capture: { maxWidth, maxHeight } }
+}
+
 /** Serialized per target by the caller, including a previous cast's teardown on reconnect. */
 export function createViewportCast(send: (method: string, params: Record<string, unknown>) => Promise<unknown>, serialize?: (fn: () => Promise<void>) => Promise<void>) {
   let tail = Promise.resolve()
@@ -50,12 +80,12 @@ export function createViewportCast(send: (method: string, params: Record<string,
   }
   const want = (v?: ViewerViewport) => { const s = v ? clampViewport(v) : null; if (s) current = { w: s.width, h: s.height } }
   const start = async (v?: ViewerViewport) => {
-    const size = v ? clampViewport(v) : null
-    if (size) {
-      await send('Emulation.setDeviceMetricsOverride', { ...size, mobile: false })
+    const plan = v ? castPlan(v) : null
+    if (plan) {
+      await send('Emulation.setDeviceMetricsOverride', { ...plan.metrics, mobile: false })
       overridden = true
     }
-    await send('Page.startScreencast', { ...SCREENCAST_PARAMS, ...(size ? { maxWidth: size.width, maxHeight: size.height } : {}) })
+    await send('Page.startScreencast', { ...SCREENCAST_PARAMS, ...(plan ? plan.capture : {}) })
   }
   return {
     /**
@@ -65,6 +95,11 @@ export function createViewportCast(send: (method: string, params: Record<string,
     current: () => current,
     start: (v?: ViewerViewport) => { want(v); return queue(() => start(v)) },
     resize: (v: ViewerViewport) => { want(v); return queue(async () => { await send('Page.stopScreencast', {}); await start(v) }) },
+    /** One sharp picture of the page now, at `QUALITY_STILL` (the still frame); null when it cannot be taken. */
+    sharp: async (): Promise<string | null> => {
+      const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: QUALITY_STILL, optimizeForSpeed: true }) as { data?: unknown } | undefined
+      return typeof r?.data === 'string' && r.data.length > 0 ? r.data : null
+    },
     stop: () => queue(async () => {
       try { await send('Page.stopScreencast', {}) } finally {
         if (overridden) { await send('Emulation.clearDeviceMetricsOverride', {}); overridden = false; current = null }

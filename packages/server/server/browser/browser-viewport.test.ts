@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { clampViewport, createViewportCast, createViewportQueue } from './browser-viewport'
 import { toCdpCommands } from './browser-input-protocol'
+import { QUALITY_MOTION } from './browser-screencast'
 
 test('viewer dimensions are finite; DPR is bounded', () => {
   expect(clampViewport({ width: NaN, height: 400, deviceScaleFactor: 1 })).toBeNull()
@@ -46,7 +47,7 @@ test('no watcher means zero CDP; last resize wins, cast follows, last leave clea
   await cast.start({ width: 390, height: 260, deviceScaleFactor: 2 })
   await Promise.all([cast.resize({ width: 1100, height: 550, deviceScaleFactor: 1 }), cast.resize({ width: 1200, height: 600, deviceScaleFactor: 2 })])
   expect(calls.filter(([m]) => m === 'Emulation.setDeviceMetricsOverride').at(-1)?.[1]).toEqual({ width: 1200, height: 600, deviceScaleFactor: 2, mobile: false })
-  expect(calls.filter(([m]) => m === 'Page.startScreencast').at(-1)?.[1]).toMatchObject({ maxWidth: 1200, maxHeight: 600 })
+  expect(calls.filter(([m]) => m === 'Page.startScreencast').at(-1)?.[1]).toMatchObject({ maxWidth: 2400, maxHeight: 1200 })
   await cast.stop()
   expect(calls.slice(-2).map(([m]) => m)).toEqual(['Page.stopScreencast', 'Emulation.clearDeviceMetricsOverride'])
 })
@@ -69,7 +70,7 @@ test('screencast bounds match the viewers viewport', async () => {
   const calls: Array<[string, Record<string, unknown>]> = []
   const cast = createViewportCast(async (method, params) => { calls.push([method, params]) })
   await cast.start({ width: 1200, height: 600, deviceScaleFactor: 2 })
-  expect(calls.at(-1)).toEqual(['Page.startScreencast', { format: 'jpeg', quality: 60, maxWidth: 1200, maxHeight: 600, everyNthFrame: 1 }])
+  expect(calls.at(-1)).toEqual(['Page.startScreencast', { format: 'jpeg', quality: QUALITY_MOTION, maxWidth: 2400, maxHeight: 1200, everyNthFrame: 1 }])
 })
 
 test('reconnect cannot clear the new viewers metrics after applying them', async () => {
