@@ -103,7 +103,9 @@ export async function cachedParseSession(
 // Same bytes, different numbers: exactly the case this stamp exists for.
 // v7: activity days follow the machine's local calendar, not UTC.
 // v8: `test_runs` was added (test-runner commands counted from the Bash tool calls) — the Live's "running the tests" step.
-const SESSION_SHAPE = 'v8'
+// v9: `daily[day].messages` counts the person's turns + assistant lines (what the lifetime counters
+// count), no longer every user-role line — tool results included, it summed to 153 % of lifetime.
+const SESSION_SHAPE = 'v9'
 
 /** Everything `scanProjectDir` needs from a transcript whose session already exists in
  *  Claude's own session-meta — which carries none of it. */

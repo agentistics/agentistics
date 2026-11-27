@@ -97,8 +97,9 @@ export interface NotProjectable {
 const MESSAGE_HOURS = 'legacy takes the local hour of EVERY timestamped transcript line (every role, system '
   + 'lines, attachments, tool results); an event stream of turns cannot reproduce it (measured: 1 of 477 '
   + 'sessions equal, A2.7), so it is left legacy-only by decision D25'
-const DAILY_MESSAGES = 'its `messages` counts every user- and assistant-role LINE (tool results included) and '
-  + 'its `hours` every timestamped line; events cover a subset of lines. Tokens are in `daily_tokens`'
+const DAILY_MESSAGES = 'its `messages` counts a person\'s turn plus each assistant line (tool results and '
+  + 'harness-injected entries are not messages, since 2026-11-27) and its `hours` every timestamped line; '
+  + 'events cover a subset of lines. Tokens are in `daily_tokens`'
 
 /**
  * Every legacy `SessionMeta` field this projection deliberately does NOT produce. Static: the reason

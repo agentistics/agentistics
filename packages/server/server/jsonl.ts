@@ -707,8 +707,11 @@ function* foldClaudeParseSteps(state: ClaudeParseState, lines: Iterable<string>,
     }
 
     if (e.type === 'user') {
-      // Counted for BOTH roles, matching `dailyActivity.messageCount`.
-      { const d = dayOf(state.daily, ts); if (d) d.messages++ }
+      // The day's `messages` is counted where `user_message_count` is (the person's turn, below) —
+      // NOT here, for every user-role line. A tool result fed back and an entry the harness injected
+      // are user-role lines too, and counting them made Σ daily.messages 153 % of the lifetime
+      // counters on a real store (101k tool_result lines against 7k human turns), so every
+      // date-filtered "Messages" card read ~50 % high. The per-day split must add up to the lifetime.
       const result = e.toolUseResult as Record<string, unknown> | undefined
       if (result && typeof result === 'object' && typeof result.agentId === 'string' && result.agentId) {
         state.sawAgentLaunch = true
@@ -734,6 +737,7 @@ function* foldClaudeParseSteps(state: ClaudeParseState, lines: Iterable<string>,
       } else {
         // Real human message (initial prompt or interruption) — this is what opens a turn.
         state.userMsgs++
+        { const d = dayOf(state.daily, ts); if (d) d.messages++ }
         { const n = textChars(msgContent); if (n > 0) { state.userChars += n; state.userCharMsgs++ } }
         if (turnEvent) turnEvent.userPrompt = true
         if (ts) {
