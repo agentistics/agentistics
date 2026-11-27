@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Calendário, gráficos por dia e custo diário: uma conversa longa agora aparece em cada dia em que trabalhou, só com a parte daquele dia. Antes ia inteira para o dia em que começou. Vale para o Claude Code, o único que registra o uso dia a dia.',
+        en: 'Calendar, per-day charts and daily cost: a long conversation now shows on each day it worked, with only that day\'s part. Before, it all went to the day it started. This applies to Claude Code, the only one that records usage day by day.',
+      },
+      {
+        pt: 'Plano de assinatura: o trabalho feito dentro do período por uma conversa que começou antes dele volta a entrar na comparação.',
+        en: 'Subscription plan: work done inside the period by a conversation that started before it is back in the comparison.',
+      },
+      {
+        pt: 'Com um filtro de datas, as chamadas de ferramentas contam só a parte do período (estimada pelas mensagens de cada dia), e não mais a conversa inteira.',
+        en: 'With a date filter, tool calls now count only the period\'s part (estimated from each day\'s messages), no longer the whole conversation.',
+      },
+    ],
+  },
   '2.230.3': {
     features: [],
     fixes: [

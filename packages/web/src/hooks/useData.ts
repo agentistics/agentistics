@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from 'react'
 import { accumulateUsageCost } from '@agentistics/core'
-import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
+import { activeInDays, activeInWindow, countsByDay, countsInDays, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, workedDays, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
 import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByHarnesses, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
 import { startOfDay, endOfDay, subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
@@ -247,9 +247,12 @@ export function summarizeApiCostByDay(
       if (lastDay === null || day > lastDay) lastDay = day
     }
   }
+  // Float sums leave a residue like 1e-13 when the days add up to the total; a value that small
+  // is not money and must not raise the "older usage has no daily record" note (> 0 check).
+  const undatedCostUSD = totalCostUSD - datedCostUSD
   return {
     days,
-    undatedCostUSD: totalCostUSD - datedCostUSD,
+    undatedCostUSD: Math.abs(undatedCostUSD) < 1e-6 ? 0 : undatedCostUSD,
     undatedTokens: totalTokens - datedTokens,
     firstDay,
     lastDay,
@@ -690,6 +693,55 @@ function splitMessages(total: number, lifeUser: number, lifeAssistant: number): 
   const user = Math.round((lifeUser / life) * total)
   return { user_message_count: user, assistant_message_count: Math.max(0, total - user) }
 }
+
+/** One session's share of one day, shaped as a session so it is priced and counted like any other. */
+interface DayPart { day: string; part: SessionMeta }
+
+/**
+ * A session split over the days it WORKED, inside `window` (`null` = all of them) — what every
+ * per-day series is built from. Each part is the same day slice the period cut uses (`daily` +
+ * `cutSessionUsage`), so the days of a window add up to the figure on the card above them.
+ *
+ * `whole` is the session as the totals see it (cut to the range, or lifetime). A session with no
+ * `daily` cannot be split and stays whole on its start day.
+ */
+function dayParts(raw: SessionMeta, whole: SessionMeta, window: ReadonlySet<string> | null): DayPart[] {
+  const days = workedDays(raw, window)
+  if (!days) return isDateStr(raw.start_time) ? [{ day: dayKey(raw.start_time), part: whole }] : []
+  const tools = countsByDay(raw.tool_counts, raw)
+  const { daily, ...rest } = raw
+  return days.map(day => {
+    const d = daily![day]!
+    return {
+      day,
+      part: {
+        ...cutSessionUsage(rest, {
+          input_tokens: d.input_tokens || 0,
+          output_tokens: d.output_tokens || 0,
+          cache_read_input_tokens: d.cache_read_input_tokens || 0,
+          cache_creation_input_tokens: d.cache_creation_input_tokens || 0,
+        }),
+        // A day records the message COUNT only; no reader of a part asks for the role split.
+        user_message_count: d.messages || 0,
+        assistant_message_count: 0,
+        tool_counts: tools?.get(day) ?? {},
+      },
+    }
+  })
+}
+
+/**
+ * Day costs that never add up to MORE than the session they split. A declared cost on a row with no
+ * tokens has no share to cut it by (`cutSessionUsage` keeps it whole), so each day would carry all
+ * of it. Less than the whole is left alone: that is work no day records, and it stays undated.
+ */
+function withinWhole(costs: number[], whole: number): number[] {
+  const total = costs.reduce((a, b) => a + b, 0)
+  return total > whole && total > 0 ? costs.map(c => (c * whole) / total) : costs
+}
+
+const messagesOf = (s: SessionMeta): number => (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
+const toolCallsOf = (s: SessionMeta): number => Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
 
 function inRange(date: Date, start: Date, end: Date) {
   return !isBefore(date, start) && !isAfter(date, end)
@@ -1526,6 +1578,10 @@ export function computeDerivedStats(
         ...(cut.hours && Object.keys(cut.hours).length > 0
           ? { message_hours: expandHours(cut.hours) }
           : {}),
+        // Tool figures are lifetime too, and no day records them: each day of the range takes its
+        // share by messages (`countsByDay`), the same share the per-day series draws.
+        ...(s.tool_counts ? { tool_counts: countsInDays(s.tool_counts, s, rangeDays) } : {}),
+        ...(s.tool_output_tokens ? { tool_output_tokens: countsInDays(s.tool_output_tokens, s, rangeDays) } : {}),
         /**
          * The tooltip's "first and last message in this hour" — filtered, not rebuilt, because
          * these ARE instants and carry their own day. Same UTC day rule as `rangeDays`.
@@ -1534,6 +1590,17 @@ export function computeDerivedStats(
           .filter(ts => rangeDays.has(dayKey(ts))),
       }
     })
+
+    // Every per-day series reads this: the days each session worked, never the day it started.
+    // `filteredSessions[i]` is the cut of `selectedSessions[i]`; the split needs the uncut one.
+    const rawOf = new Map(filteredSessions.map((cut, i) => [cut, selectedSessions[i]!]))
+    const seriesWindow = rangeBounded ? rangeDays : null
+    const partsMemo = new Map<SessionMeta, DayPart[]>()
+    const seriesOf = (s: SessionMeta): DayPart[] => {
+      let parts = partsMemo.get(s)
+      if (!parts) partsMemo.set(s, parts = dayParts(rawOf.get(s) ?? s, s, seriesWindow))
+      return parts
+    }
 
     // Non-Claude sessions in the active date range — used to supplement statsCache totals
     // in the unified view (no harness filter). When a harness filter is active OR there are
@@ -1555,13 +1622,13 @@ export function computeDerivedStats(
       // are added once, through `nonClaudeInRange`; letting them in here counted every one of them
       // twice in the unfiltered view whenever its day was missing from the cache.
       if ((s.harness ?? 'claude') !== 'claude') continue
-      if (!isDateStr(s.start_time)) continue
-      const day = format(parseISO(s.start_time), 'yyyy-MM-dd')
-      if (dailyActivityDates.has(day)) continue // already covered by statsCache
-      if (!supplementByDay[day]) supplementByDay[day] = { messageCount: 0, sessionCount: 0, toolCallCount: 0 }
-      supplementByDay[day].messageCount += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
-      supplementByDay[day].sessionCount += 1
-      supplementByDay[day].toolCallCount += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
+      for (const { day, part } of seriesOf(s)) {
+        if (dailyActivityDates.has(day)) continue // already covered by statsCache
+        if (!supplementByDay[day]) supplementByDay[day] = { messageCount: 0, sessionCount: 0, toolCallCount: 0 }
+        supplementByDay[day].messageCount += messagesOf(part)
+        supplementByDay[day].sessionCount += 1
+        supplementByDay[day].toolCallCount += toolCallsOf(part)
+      }
     }
     const extendedDailyActivity = [
       ...filteredDailyActivity,
@@ -1624,19 +1691,30 @@ export function computeDerivedStats(
     const harnessesFiltered = harnessActive && !claudeOnlyHarness
     const sessionFiltered = cacheBlindScope || nonClaudeHarness || harnessesFiltered
 
+    // The Claude sessions the CARDS add to the cache: those that started on a day it does not hold,
+    // each once. `extendedDailyActivity` counts a session on every day it worked, which is what the
+    // calendar draws and never a number of sessions.
+    const claudeUncached = filteredSessions.filter(s => (s.harness ?? 'claude') === 'claude'
+      && isDateStr(s.start_time) && !dailyActivityDates.has(dayKey(s.start_time)))
+    // With no date cut nothing is split by day either: the cards read the lifetime counters, not the
+    // day split (whose message count is not the same measure).
+    const cardDays = rangeBounded
+      ? extendedDailyActivity
+      : [...filteredDailyActivity, ...claudeUncached.map(s => ({ messageCount: messagesOf(s), toolCallCount: toolCallsOf(s) }))]
+
     const totalMessages = sessionFiltered
-      ? filteredSessions.reduce((s, sess) => s + (sess.user_message_count ?? 0) + (sess.assistant_message_count ?? 0), 0)
-      : extendedDailyActivity.reduce((s, d) => s + d.messageCount, 0)
-        + nonClaudeInRange.reduce((s, sess) => s + (sess.user_message_count ?? 0) + (sess.assistant_message_count ?? 0), 0)
+      ? filteredSessions.reduce((s, sess) => s + messagesOf(sess), 0)
+      : cardDays.reduce((s, d) => s + d.messageCount, 0)
+        + nonClaudeInRange.reduce((s, sess) => s + messagesOf(sess), 0)
 
     const totalSessions = sessionFiltered
       ? filteredSessions.length
-      : extendedDailyActivity.reduce((s, d) => s + d.sessionCount, 0) + nonClaudeInRange.length
+      : filteredDailyActivity.reduce((s, d) => s + d.sessionCount, 0) + claudeUncached.length + nonClaudeInRange.length
 
     const totalToolCalls = sessionFiltered
-      ? filteredSessions.reduce((s, sess) => s + Object.values(sess.tool_counts ?? {}).reduce((a, b) => a + b, 0), 0)
-      : extendedDailyActivity.reduce((s, d) => s + d.toolCallCount, 0)
-        + nonClaudeInRange.reduce((s, sess) => s + Object.values(sess.tool_counts ?? {}).reduce((a, b) => a + b, 0), 0)
+      ? filteredSessions.reduce((s, sess) => s + toolCallsOf(sess), 0)
+      : cardDays.reduce((s, d) => s + d.toolCallCount, 0)
+        + nonClaudeInRange.reduce((s, sess) => s + toolCallsOf(sess), 0)
 
     // Both streaks use the same local calendar and ignore the date picker. Aggregate
     // daily keys have no timezone/turn timestamps and cannot safely supply local days.
@@ -1679,70 +1757,25 @@ export function computeDerivedStats(
     const longestStreak = calcLongestStreak(activeDates)
 
     // Heatmap data
-    let heatmapData: { date: string; value: number; sessions: number; tools: number }[]
-    if (sessionFiltered) {
-      const byDay: Record<string, { value: number; sessions: number; tools: number }> = {}
-      // A DAY THE SESSION WORKED, NOT THE DAY IT STARTED.
-      //
-      // Reported: "estou há alguns dias trabalhando e dia 4 foi pulado". It was: 20 sessions
-      // touched 2026-09-04 on this machine and 17 of them STARTED on it, while the calendar showed
-      // nothing. The day filter learned to read `SessionMeta.daily` and this did not — it still
-      // filed each session entirely on `start_time`, so a conversation open since Tuesday drew one
-      // cell on Tuesday and left every day it actually worked blank. A calendar of when work
-      // BEGAN is not a calendar of when work happened.
-      //
-      // `selectedSessions` and not `filteredSessions`: the second has already been cut to the
-      // range by `sliceSession`, which spends `daily` and drops it — exactly the field this needs.
-      // A session with no `daily` keeps the start-day rule, as everywhere else: it cannot be split
-      // and inventing a spread for it would be worse than filing it where it began.
-      for (const s of selectedSessions) {
-        const daily = s.daily
-        if (daily) {
-          const lifeMsgs = (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
-          const lifeTools = Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-          for (const [day, u] of Object.entries(daily)) {
-            const msgs = u.messages ?? 0
-            // A day the session merely EXISTED through, with no turn on it, is not activity —
-            // the same rule `activeInDays` applies, so the two cannot disagree about which days
-            // a session was alive on.
-            if (msgs <= 0 && (u.input_tokens ?? 0) <= 0 && (u.output_tokens ?? 0) <= 0) continue
-            if (!byDay[day]) byDay[day] = { value: 0, sessions: 0, tools: 0 }
-            byDay[day].value += msgs
-            // ONE PER DAY IT WORKED. "Sessions per day" is how many conversations were alive that
-            // day, which is the question the chart's own title asks — counting each only on its
-            // first day is what made a week of work look like a single spike.
-            byDay[day].sessions += 1
-            // Tool calls are NOT recorded per day, so this is an apportionment by that day's share
-            // of the session's messages — the same treatment `splitMessages` already gives the
-            // user/assistant split for the same reason, and it is stated rather than passed off as
-            // a measurement. It only ever feeds the tooltip.
-            byDay[day].tools += lifeMsgs > 0 ? Math.round((msgs / lifeMsgs) * lifeTools) : 0
-          }
-          continue
-        }
-        if (!isDateStr(s.start_time)) continue
-        const day = format(parseISO(s.start_time), 'yyyy-MM-dd')
-        if (!byDay[day]) byDay[day] = { value: 0, sessions: 0, tools: 0 }
-        byDay[day].value += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
-        byDay[day].sessions += 1
-        byDay[day].tools += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-      }
-      heatmapData = Object.entries(byDay).map(([date, v]) => ({ date, ...v }))
-    } else {
-      const heatmapByDay: Record<string, { value: number; sessions: number; tools: number }> = {}
+    //
+    // A DAY THE SESSION WORKED, NOT THE DAY IT STARTED, and only the days of the range. "Sessions
+    // per day" is how many conversations were alive then, so one counts on each day it worked.
+    // Tool calls are not recorded per day: each day takes its share by messages (`countsByDay`).
+    const heatmapByDay: Record<string, { value: number; sessions: number; tools: number }> = {}
+    if (!sessionFiltered) {
       for (const d of extendedDailyActivity) {
         heatmapByDay[d.date] = { value: d.messageCount, sessions: d.sessionCount, tools: d.toolCallCount }
       }
-      for (const s of nonClaudeInRange) {
-        if (!isDateStr(s.start_time)) continue
-        const day = format(parseISO(s.start_time), 'yyyy-MM-dd')
-        if (!heatmapByDay[day]) heatmapByDay[day] = { value: 0, sessions: 0, tools: 0 }
-        heatmapByDay[day].value += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
-        heatmapByDay[day].sessions += 1
-        heatmapByDay[day].tools += Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
-      }
-      heatmapData = Object.entries(heatmapByDay).map(([date, v]) => ({ date, ...v }))
     }
+    for (const s of sessionFiltered ? filteredSessions : nonClaudeInRange) {
+      for (const { day, part } of seriesOf(s)) {
+        const cell = (heatmapByDay[day] ??= { value: 0, sessions: 0, tools: 0 })
+        cell.value += messagesOf(part)
+        cell.sessions += 1
+        cell.tools += toolCallsOf(part)
+      }
+    }
+    const heatmapData = Object.entries(heatmapByDay).map(([date, v]) => ({ date, ...v }))
     heatmapData.sort((a, b) => a.date.localeCompare(b.date))
 
     /**
@@ -1763,13 +1796,13 @@ export function computeDerivedStats(
       const perSession = sessionFiltered ? filteredSessions : nonClaudeInRange
       const byHarnessDay: Record<string, Record<string, { value: number; sessions: number }>> = {}
       for (const s of perSession) {
-        if (!isDateStr(s.start_time)) continue
-        const day = format(parseISO(s.start_time), 'yyyy-MM-dd')
-        const h = s.harness ?? 'claude'
-        const days = byHarnessDay[h] ?? (byHarnessDay[h] = {})
-        const cell = days[day] ?? (days[day] = { value: 0, sessions: 0 })
-        cell.value += (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)
-        cell.sessions += 1
+        for (const { day, part } of seriesOf(s)) {
+          const h = s.harness ?? 'claude'
+          const days = byHarnessDay[h] ?? (byHarnessDay[h] = {})
+          const cell = days[day] ?? (days[day] = { value: 0, sessions: 0 })
+          cell.value += messagesOf(part)
+          cell.sessions += 1
+        }
       }
       for (const [h, days] of Object.entries(byHarnessDay)) {
         heatmapByHarness[h] = Object.entries(days)
@@ -1971,8 +2004,15 @@ export function computeDerivedStats(
       entry.tokens += tokens
       entry.sessions += sessions
     }
-    const dayOf = (s: { start_time?: string }): string | null =>
-      isDateStr(s.start_time) ? dayKey(s.start_time) : null
+    // A session is COUNTED on the first of its days only: `sessions` adds up to sessions, which is
+    // what the plan basis reports as excluded.
+    const sessionDayCosts = (sess: SessionMeta, whole: number, price: (part: SessionMeta) => number) => {
+      const parts = seriesOf(sess)
+      const costs = withinWhole(parts.map(p => price(p.part)), whole)
+      return parts.map(({ day, part }, i) => ({
+        day, costUSD: costs[i]!, tokens: totalTokens(sessionTokens(part)), sessions: i === 0 ? 1 : 0,
+      }))
+    }
 
     let totalCostUSD = 0
     let unpricedTokensAll = 0
@@ -1993,11 +2033,10 @@ export function computeDerivedStats(
         const sessCost = cost ?? 0
         unpricedTokensAll += unpricedTokens(sess, modelSetFallback)
         totalCostUSD += sessCost
-        const tokens = (sess.input_tokens ?? 0) + (sess.output_tokens ?? 0)
-          + (sess.cache_read_input_tokens ?? 0) + (sess.cache_creation_input_tokens ?? 0)
-        totalTokensAll += tokens
-        const day = dayOf(sess)
-        if (day) addDayCost(sess.harness ?? 'claude', day, sessCost, tokens, 1)
+        totalTokensAll += totalTokens(sessionTokens(sess))
+        for (const d of sessionDayCosts(sess, sessCost, p => sessionCostUSD(p, modelSetFallback) ?? 0)) {
+          addDayCost(sess.harness ?? 'claude', d.day, d.costUSD, d.tokens, d.sessions)
+        }
       }
     } else {
       totalCostUSD = Object.entries(filteredModelUsage).reduce((s, [id, u]) => s + calcCost(u, id), 0)
@@ -2035,6 +2074,17 @@ export function computeDerivedStats(
         }
         if (dayCost > 0 || dayTokens > 0) addDayCost('claude', key, dayCost, dayTokens, 0)
       }
+      // Under a date filter the headline is exactly "cached days apportioned + covered days exact",
+      // so the day series is built from those two and nothing else: a covered day the cache has no
+      // entry for joins here.
+      const headlineDated = dateFiltered && rangeBounded
+      if (headlineDated) {
+        const cached = new Set(filteredDailyModelTokens.map(d => d.date.slice(0, 10)))
+        for (const [day, perModel] of exactClaudeUsageByDay) {
+          if (cached.has(day)) continue
+          for (const [model, u] of Object.entries(perModel)) addDayCost('claude', day, calcCost(u, model), usageTokenTotal(u), 0)
+        }
+      }
 
       // Claude's SESSIONS also carry a day, and they reach further back than `dailyModelTokens`
       // does. Without this, ticking the Claude harness chip — which flips the fork above to the
@@ -2049,17 +2099,21 @@ export function computeDerivedStats(
       const fromSessions: Record<string, { costUSD: number; tokens: number; sessions: number }> = {}
       for (const sess of filteredSessions) {
         if ((sess.harness ?? 'claude') !== 'claude') continue
-        const day = dayOf(sess)
-        if (!day) continue
-        const entry = (fromSessions[day] ??= { costUSD: 0, tokens: 0, sessions: 0 })
-        entry.costUSD += sessionCostUSD(sess) ?? 0
-        entry.tokens += (sess.input_tokens ?? 0) + (sess.output_tokens ?? 0)
-          + (sess.cache_read_input_tokens ?? 0) + (sess.cache_creation_input_tokens ?? 0)
-        entry.sessions += 1
+        for (const d of sessionDayCosts(sess, sessionCostUSD(sess) ?? 0, p => sessionCostUSD(p) ?? 0)) {
+          const entry = (fromSessions[d.day] ??= { costUSD: 0, tokens: 0, sessions: 0 })
+          entry.costUSD += d.costUSD
+          entry.tokens += d.tokens
+          entry.sessions += d.sessions
+        }
       }
       const claudeDays = (costDays.claude ??= {})
       for (const [day, entry] of Object.entries(fromSessions)) {
         const prev = claudeDays[day]
+        // Dated from the headline: the sessions add their count, never money the total does not hold.
+        if (headlineDated) {
+          if (prev) prev.sessions = Math.max(prev.sessions, entry.sessions)
+          continue
+        }
         claudeDays[day] = prev
           ? {
               costUSD: Math.max(prev.costUSD, entry.costUSD),
@@ -2070,17 +2124,13 @@ export function computeDerivedStats(
       }
 
       // The non-Claude half is per-session and therefore fully dated.
+      const priced = (s: SessionMeta) => sessionModelUsage(s)
+        .filter(([m]) => !modelSet || modelSet.has(m))
+        .reduce((total, [m, u]) => total + calcCost(u, m), 0)
       for (const sess of nonClaudeInRange) {
-        const day = dayOf(sess)
-        if (!day) continue
-        let sessCost = 0
-        let tokens = 0
-        for (const [m, u] of sessionModelUsage(sess)) {
-          if (modelSet && !modelSet.has(m)) continue
-          sessCost += calcCost(u, m)
-          tokens += usageTokenTotal(u)
+        for (const d of sessionDayCosts(sess, priced(sess), priced)) {
+          addDayCost(sess.harness ?? 'claude', d.day, d.costUSD, d.tokens, d.sessions)
         }
-        addDayCost(sess.harness ?? 'claude', day, sessCost, tokens, 1)
       }
     }
 
@@ -2229,9 +2279,8 @@ export function computeDerivedStats(
       if (s.start_time) {
         if (!r.firstActive || s.start_time < r.firstActive) r.firstActive = s.start_time
         if (!r.lastActive || s.start_time > r.lastActive) r.lastActive = s.start_time
-        const day = dayKey(s.start_time)
-        r.activityByDay[day] = (r.activityByDay[day] ?? 0) + 1
       }
+      for (const { day } of seriesOf(s)) r.activityByDay[day] = (r.activityByDay[day] ?? 0) + 1
     }
     // Finalize Set-backed fields into plain arrays + resolve the representative folder path/name.
     for (const r of Object.values(repoStatsMap)) {
