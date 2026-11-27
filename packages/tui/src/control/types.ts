@@ -869,6 +869,12 @@ export interface ControlSession {
    */
   background?: boolean
   /**
+   * Busy direct children this finished turn (`state: 'waiting'`) is waiting on — there is nothing for a
+   * person to answer, so `needsOwner` (`@agentistics/core`) leaves it out of every "needs you" count.
+   * Absent on every other row.
+   */
+  waitingOnWorkers?: number
+  /**
    * The reasoning effort this session was STARTED with, when one was asked for.
    *
    * Recorded at spawn, like `model` beside it — it is what agentop passed, not something read back

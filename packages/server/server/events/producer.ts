@@ -62,7 +62,11 @@ export function toCandidate(v: {
   conversationId?: string
   activity?: EventCandidate['activity']
   lastLines?: string[]
+  waitingOnWorkers?: number
 }): EventCandidate {
+  // A finished turn waiting on its workers is the team still working: no "waiting" event (push,
+  // desktop, peer) until the last worker stops — and THEN the change is a transition that is reported.
+  const activity = v.activity === 'waiting' && v.waitingOnWorkers ? 'working' as const : v.activity
   return {
     id: v.id,
     ...(v.harness ? { harness: v.harness } : {}),
@@ -70,7 +74,7 @@ export function toCandidate(v: {
     ...(v.task ? { task: v.task } : {}),
     ...(v.label ? { label: v.label } : {}),
     ...(v.conversationId ? { conversationId: v.conversationId } : {}),
-    ...(v.activity ? { activity: v.activity } : {}),
+    ...(activity ? { activity } : {}),
     ...(v.lastLines && v.lastLines.length > 0 ? { lines: v.lastLines } : {}),
   }
 }

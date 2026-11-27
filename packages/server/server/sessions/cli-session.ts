@@ -33,7 +33,7 @@ import {
 import { readSpawnBudget } from './memory-probe'
 import { toControlSession } from './control-session'
 import { recordedRepo, repoFacts } from './repo-facts'
-import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
+import { emptyReason, renderSessionTable, resolveWidth, waitingOnReader } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
@@ -64,7 +64,7 @@ import { loadHarnessSessions } from './harness-sessions'
 import { createSessionsPoller, type SessionSnapshot } from './sessions-host'
 import { loadNativeFleet, resolveNativeRef, runNativeVerb } from './native-fleet'
 import { isServerProcess, readServerSnapshot } from './shared-snapshot'
-import { needsAttention, type SessionView } from './session-view'
+import { needsAttention, waitingOnItsWorkers, type SessionView } from './session-view'
 import { planTaskReopen, taskReopenSucceeded } from './task-reopen'
 import { AGENTISTICS_DATA_DIR, TASKS_FILE, PORT } from '../config'
 import { createTaskStore } from './task-store'
@@ -1426,7 +1426,7 @@ async function ls(
     },
   })) console.log(line)
 
-  const waiting = shown.filter(v => v.state === 'waiting' || v.state === 'waiting-approval')
+  const waiting = waitingOnReader(shown)
   if (waiting.length > 0) {
     console.log('')
     say(s.sessLs.waiting(waiting.length, waiting.map(v => v.title).join(', ')))
@@ -1467,7 +1467,7 @@ async function list(backend: SessionBackend, json = false): Promise<number> {
     console.log(`${id}\t${stateWord(v)}\t${v.harness ?? '?'}\t${v.label ?? ''}\t${v.cwd}`)
   }
 
-  const waiting = snap.sessions.filter(v => needsAttention(v.activity))
+  const waiting = snap.sessions.filter(v => needsAttention(v.activity) && !waitingOnItsWorkers(v))
   if (waiting.length > 0) {
     console.log(`\n${waiting.length} session(s) waiting on you: ${waiting.map(v => v.label ?? v.id).join(', ')}`)
   }

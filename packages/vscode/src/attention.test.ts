@@ -85,4 +85,11 @@ describe('readAttention', () => {
     expect(b.memory.has('x')).toBe(false)
     expect(readAttention(b.memory, [row('x', 'waiting-approval')]).announce.map(r => r.id)).toEqual(['x'])
   })
+
+  it('a leader waiting on its workers is not counted; a dialog on it still is', () => {
+    const lead = { ...row('lead', 'waiting'), waitingOnWorkers: 2 }
+    expect(readAttention(null, [lead, row('w', 'working')]).count).toBe(0)
+    expect(readAttention(null, [row('lead', 'waiting')]).count).toBe(1)
+    expect(readAttention(null, [{ ...row('lead', 'waiting-approval'), waitingOnWorkers: 2 }]).count).toBe(1)
+  })
 })

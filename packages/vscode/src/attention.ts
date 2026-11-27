@@ -21,6 +21,7 @@
  *   one state where the session is BLOCKED and cannot proceed without an answer.
  */
 
+import { needsOwner } from '@agentistics/core'
 import type { FleetRow, SessionState } from './protocol'
 
 /** States that raise a notification when a row enters one. See the header for why it is just one. */
@@ -57,7 +58,8 @@ export function readAttention(previous: AttentionMemory, rows: readonly FleetRow
 
   return {
     announce,
-    count: rows.filter(r => ATTENTION.has(r.state)).length,
+    // A turn waiting on its own workers is not waiting on the person (`needsOwner`).
+    count: rows.filter(r => ATTENTION.has(r.state) && needsOwner(r)).length,
     memory,
   }
 }

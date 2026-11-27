@@ -27,6 +27,7 @@ import type {
   TranscriptSearch,
 } from '../types'
 import type { ControlStrings } from '../i18n'
+import { needsOwner, ownerState } from '@agentistics/core'
 import {
   activeScopes, allState, selectionFromScopes, selectionToScopes, toggleAllScopes, toggleScope,
   transcriptScopeOn, SEARCH_TOGGLES, searchDepthText,
@@ -2024,8 +2025,7 @@ export function Sessions({
         // ten — a number describing a screen nobody is looking at.
         shown={rows.reduce((n, r) => n + (r.kind === 'session' ? 1 : 0), 0)}
         // Counted from the SAME drawn rows, for the same reason `shown` is.
-        waitingShown={rows.reduce((n, r) => n + (r.kind === 'session'
-          && (r.session.state === 'waiting' || r.session.state === 'waiting-approval') ? 1 : 0), 0)}
+        waitingShown={rows.reduce((n, r) => n + (r.kind === 'session' && needsOwner(r.session) ? 1 : 0), 0)}
         query={query}
         depth={depth}
         scope={projectFilter ?? taskFilter ?? ''}
@@ -2506,7 +2506,7 @@ function SessionRowView({ session, selected, marked, stopping, notify, ages, col
           wears the state's own colour, so red and amber keep meaning the same thing across the row,
           and it costs nothing at all on a fleet where nothing is waiting. */}
       {notify > 0 ? (
-        <Text color={STATE_COLOR[session.state]} bold>
+        <Text color={STATE_COLOR[ownerState(session)]} bold>
           {sessionNotify(session) ? '● ' : ' '.repeat(notify)}
         </Text>
       ) : null}
@@ -2532,7 +2532,7 @@ function SessionRowView({ session, selected, marked, stopping, notify, ages, col
         </Text>
       ) : null}
       <Text
-        color={selected ? COLORS.info : STATE_COLOR[session.state]}
+        color={selected ? COLORS.info : STATE_COLOR[ownerState(session)]}
         underline={selected}
         bold={selected || session.state === 'waiting-approval'}
       >
@@ -2805,7 +2805,7 @@ function SessionCard({ session, group, headed, selected, marked, stopping, width
           marked={marked}
           stopping={stopping}
           selected={selected}
-          stateColor={STATE_COLOR[session.state]}
+          stateColor={STATE_COLOR[ownerState(session)]}
           bold={session.state === 'waiting-approval'}
         />
       ))}

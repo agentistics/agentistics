@@ -14,11 +14,11 @@
  * external `unknown` process) are not Nay sessions agentop hosts and are left out.
  */
 
-import { isNayCwd, sessionIdentityKey } from '@agentistics/core'
+import { isNayCwd, isWaitingOnWorkers, sessionIdentityKey } from '@agentistics/core'
 
 export type NaySectionId = 'working' | 'waiting' | 'ended'
 
-export interface NayListRow { id: string; conversationId?: string | undefined; cwd?: string | undefined; state: string; startedAt?: number }
+export interface NayListRow { id: string; conversationId?: string | undefined; cwd?: string | undefined; state: string; startedAt?: number; waitingOnWorkers?: number }
 
 export const NAY_SECTION_ORDER: readonly NaySectionId[] = ['working', 'waiting', 'ended']
 
@@ -34,19 +34,22 @@ export function naySectionOf(state: string): NaySectionId | null {
 
 const RANK: Record<NaySectionId, number> = { working: 0, waiting: 1, ended: 2 }
 
+/** A conversation waiting on its workers is working, never "waiting for you". */
+const rowSection = (r: NayListRow): NaySectionId | null => naySectionOf(isWaitingOnWorkers(r) ? 'working' : r.state)
+
 export function naySections<R extends NayListRow>(rows: readonly R[]): Record<NaySectionId, R[]> {
   const best = new Map<string, R>()
   for (const r of rows) {
     if (!isNayCwd(r.cwd)) continue
-    const section = naySectionOf(r.state)
+    const section = rowSection(r)
     if (!section) continue
     const key = sessionIdentityKey(r)
     const held = best.get(key)
-    if (!held || RANK[section] < RANK[naySectionOf(held.state)!]
-      || (RANK[section] === RANK[naySectionOf(held.state)!] && (r.startedAt ?? 0) > (held.startedAt ?? 0))) best.set(key, r)
+    if (!held || RANK[section] < RANK[rowSection(held)!]
+      || (RANK[section] === RANK[rowSection(held)!] && (r.startedAt ?? 0) > (held.startedAt ?? 0))) best.set(key, r)
   }
   const out: Record<NaySectionId, R[]> = { working: [], waiting: [], ended: [] }
-  for (const r of best.values()) out[naySectionOf(r.state)!].push(r)
+  for (const r of best.values()) out[rowSection(r)!].push(r)
   for (const id of NAY_SECTION_ORDER) out[id].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
   out.ended = out.ended.slice(0, NAY_ENDED_SHOWN)
   return out

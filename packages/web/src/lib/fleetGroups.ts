@@ -19,6 +19,7 @@
  * person can apply on top of the automatic (most-urgent-first) order.
  */
 
+import { isWaitingOnWorkers } from '@agentistics/core'
 import {
   DEFAULT_ORDER, dimensionWordBook, groupSessions, sessionRank, sortSessions,
   type ControlSession, type DimensionWordBook, type SessionGroup, type SessionState,
@@ -83,6 +84,8 @@ const STATUS_GROUP_WORDS: Record<SessionState, { en: string; pt: string }> = {
   unknown: { en: 'External', pt: 'Externas' },
 }
 
+const WAITING_WORKERS_WORDS = { en: 'Waiting on workers', pt: 'Esperando workers' } as const
+
 /**
  * One group per raw state — never through `bucketKey`/`groupSessions`, and never collapsed.
  *
@@ -90,11 +93,14 @@ const STATUS_GROUP_WORDS: Record<SessionState, { en: string; pt: string }> = {
  * member, ties broken by label.
  */
 function statusGroups(rows: readonly ControlSession[], lang: Lang, sortOrder: SessionOrder): SessionGroup[] {
-  const groups = new Map<SessionState, SessionGroup>()
+  const groups = new Map<string, SessionGroup>()
   for (const s of rows) {
-    const found = groups.get(s.state)
+    // A turn waiting on its workers has its own heading: it must not sit under "Needs you".
+    const key = isWaitingOnWorkers(s) ? 'waiting-workers' : s.state
+    const label = isWaitingOnWorkers(s) ? WAITING_WORKERS_WORDS[lang] : STATUS_GROUP_WORDS[s.state][lang]
+    const found = groups.get(key)
     if (found) found.sessions.push(s)
-    else groups.set(s.state, { key: s.state, label: STATUS_GROUP_WORDS[s.state][lang], sessions: [s] })
+    else groups.set(key, { key, label, sessions: [s] })
   }
   return [...groups.values()]
     .map(g => ({ ...g, sessions: sortSessions(g.sessions, sortOrder) }))

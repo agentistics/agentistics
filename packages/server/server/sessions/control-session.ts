@@ -178,9 +178,12 @@ export function toControlSession(
     // relayed fleet — from the one place the word is decided. A cell of its own would have to be
     // added to each of them, and the first one missed would say `needs you` about a session that
     // still has work running, which is the reading this mark exists to correct.
-    stateLabel: v.background
-      ? `${stateLabel(state, s, v.status === 'external')} · ${s.sessBackground}`
-      : stateLabel(state, s, v.status === 'external'),
+    stateLabel: state === 'waiting' && v.waitingOnWorkers
+      ? s.sessWaitingWorkers(v.waitingOnWorkers)
+      : v.background
+        ? `${stateLabel(state, s, v.status === 'external')} · ${s.sessBackground}`
+        : stateLabel(state, s, v.status === 'external'),
+    ...(state === 'waiting' && v.waitingOnWorkers ? { waitingOnWorkers: v.waitingOnWorkers } : {}),
     // The machine-readable half, for a surface that wants to style it rather than read it.
     ...(v.background ? { background: true } : {}),
     actionable: v.status !== 'external' && v.status !== 'closed',

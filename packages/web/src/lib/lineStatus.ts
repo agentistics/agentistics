@@ -27,6 +27,8 @@ export type LineStatusKind =
   | 'approval'
   /** The turn ended: the session is at its prompt, waiting for a person. */
   | 'you'
+  /** The turn ended and the session waits on busy workers it started: nothing for a person to answer. */
+  | 'workers'
   /** Alive and quiet (`idle`, `unknown`). */
   | 'idle'
   /** Finished (`exited`, `closed`). */
@@ -42,13 +44,15 @@ export const LINE_STATUS_COLOR: Record<LineStatusKind, string> = {
   queue: '#f0a020',
   approval: '#b48cff',
   you: '#b48cff',
+  // Calm on purpose: nothing is asked of the person.
+  workers: 'var(--accent-cyan)',
   idle: 'var(--text-tertiary)',
   ended: 'var(--text-tertiary)',
   fell: 'var(--accent-red)',
 }
 
 /** The kind a row wears. `fell` is the caller's knowledge (the machine said so); everything else is the row's. */
-export function lineStatusKind(state: SessionState, signal: ActivitySignal | null | undefined, fell = false): LineStatusKind {
+export function lineStatusKind(state: SessionState, signal: ActivitySignal | null | undefined, fell = false, waitingOnWorkers = 0): LineStatusKind {
   if (fell || state === 'lost') return 'fell'
   if (state === 'exited' || state === 'closed') return 'ended'
   // A dialog outranks activity evidence, the same precedence `liveAge` applies.
@@ -57,7 +61,7 @@ export function lineStatusKind(state: SessionState, signal: ActivitySignal | nul
   if (signal === 'tool' || signal === 'heavy-hold') return 'cmd'
   if (signal === 'task') return 'task'
   if (signal === 'output' || state === 'working') return 'writing'
-  if (state === 'waiting') return 'you'
+  if (state === 'waiting') return waitingOnWorkers > 0 ? 'workers' : 'you'
   return 'idle'
 }
 
@@ -68,13 +72,18 @@ const BASE: Record<LineStatusKind, { pt: string; en: string }> = {
   queue: { pt: 'na fila de trabalho pesado', en: 'queued for heavy work' },
   approval: { pt: 'esperando sua resposta (pergunta ou aprovação)', en: 'waiting for your answer (question or approval)' },
   you: { pt: 'esperando você', en: 'waiting for you' },
+  workers: { pt: 'esperando workers', en: 'waiting on workers' },
   idle: { pt: 'parada', en: 'idle' },
   ended: { pt: 'encerrada', en: 'ended' },
   fell: { pt: 'caiu', en: 'fell' },
 }
 
 /** The state's word alone ("na fila de trabalho pesado") — the icon's accessible name. */
-export function lineStatusWord(kind: LineStatusKind, pt: boolean): string {
+export function lineStatusWord(kind: LineStatusKind, pt: boolean, workers = 0): string {
+  if (kind === 'workers' && workers > 0) {
+    const noun = workers === 1 ? 'worker' : 'workers'
+    return pt ? `esperando ${workers} ${noun}` : `waiting on ${workers} ${noun}`
+  }
   return pt ? BASE[kind].pt : BASE[kind].en
 }
 
@@ -83,8 +92,8 @@ export function lineStatusWord(kind: LineStatusKind, pt: boolean): string {
  * ("rodando há 1 min", "trabalhando agora", "encerrada · 14:30", "caiu há 3 h"). Never "rodando há
  * agora": a span under a minute is "agora" and is said as such.
  */
-export function lineStatusText(kind: LineStatusKind, time: string | null | undefined, pt: boolean): string {
-  const base = lineStatusWord(kind, pt)
+export function lineStatusText(kind: LineStatusKind, time: string | null | undefined, pt: boolean, workers = 0): string {
+  const base = lineStatusWord(kind, pt, workers)
   if (!time) return base
   // Ended rows carry a clock time / "ontem"; fallen rows already carry "há 3 h" / "3 h ago".
   if (kind === 'ended') return `${base} · ${time}`
