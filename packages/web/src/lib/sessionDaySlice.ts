@@ -190,6 +190,65 @@ export function activeInWindow(s: SliceableSession, startMs: number, endMs: numb
   return false
 }
 
+/**
+ * The days a session worked, in order, restricted to `window` (`null` = every day). `[]` when it
+ * worked, but never inside the window; `null` when it cannot be split (no `daily`, or nothing on it
+ * records work) and the caller must file it on its start day.
+ */
+export function workedDays(s: SliceableSession, window: ReadonlySet<string> | null): string[] | null {
+  if (!s.daily) return null
+  const days = Object.keys(s.daily).filter(key => worked(s.daily![key])).sort()
+  if (days.length === 0) return null
+  return window ? days.filter(key => window.has(key)) : days
+}
+
+/**
+ * A session's LIFETIME per-tool counts, split by the days it worked.
+ *
+ * `daily` records no tool calls, so this is an APPORTIONMENT by each day's share of the session's
+ * messages — the same treatment the calendar and the server's day series already give them. The
+ * rounding is cumulative, so the days add up to the lifetime figure exactly and any set of one-day
+ * views adds up to the view of the whole range. With no messages on any day, the first one takes all.
+ * `null` when the session cannot be split.
+ */
+export function countsByDay(
+  counts: Record<string, number> | undefined,
+  s: SliceableSession,
+): Map<string, Record<string, number>> | null {
+  const days = workedDays(s, null)
+  if (!days) return null
+  const messages = days.map(key => s.daily![key]!.messages || 0)
+  const total = messages.reduce((a, b) => a + b, 0)
+  const out = new Map<string, Record<string, number>>(days.map(key => [key, {}]))
+  for (const [name, count] of Object.entries(counts ?? {})) {
+    let seen = 0
+    let given = 0
+    days.forEach((key, i) => {
+      seen += messages[i]!
+      const upTo = total > 0 ? Math.round((count * seen) / total) : count
+      if (upTo > given) out.get(key)![name] = upTo - given
+      given = upTo
+    })
+  }
+  return out
+}
+
+/** `countsByDay` summed over `window`. A session that cannot be split keeps its lifetime counts. */
+export function countsInDays(
+  counts: Record<string, number> | undefined,
+  s: SliceableSession,
+  window: ReadonlySet<string>,
+): Record<string, number> | undefined {
+  const byDay = counts && countsByDay(counts, s)
+  if (!byDay) return counts
+  const out: Record<string, number> = {}
+  for (const [day, part] of byDay) {
+    if (!window.has(day)) continue
+    for (const [name, n] of Object.entries(part)) out[name] = (out[name] ?? 0) + n
+  }
+  return out
+}
+
 /** Did this session do anything inside `days`? `false` for a sliceable session that did nothing. */
 export function activeInDays(s: SliceableSession, days: ReadonlySet<string>): boolean {
   if (!s.daily) return days.has(dayKey(s.start_time))

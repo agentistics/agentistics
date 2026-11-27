@@ -3018,6 +3018,19 @@ harness must not break.
   rather than rebuilt: those are instants and carry their own day. A session whose days carry no
   `hours` (a record written before the field existed) KEEPS its lifetime array, the same rule a
   session with no `daily` already had — a record that cannot be split is not one that did nothing.
+  **PER-DAY SERIES USE THE SAME SPLIT** (`dayParts` in `useData.ts`): the calendar, the per-harness
+  trend, `apiCostByDay` (so the plan basis), the Claude cache's gap days and the repo sparkline file
+  each session on the days it WORKED inside the window, never on `start_time`; a session with no
+  `daily` keeps its start day, and `sessions` in the cost series counts it once. Under a date filter
+  the Claude day series is the headline's own composition (cached days apportioned + covered days
+  exact). `daily` records no tool calls, so `tool_counts` / `tool_output_tokens` are APPORTIONED by
+  each day's share of messages (`countsByDay`, cumulative rounding: the days add up exactly). Git
+  commits, lines and files are still lifetime on a cut session, and so is the Compare page's
+  activity-over-time (`computeHarnessSummaries`).
+  **The CARDS are not the sum of the calendar.** "Sessions" counts a session ONCE, on its start day
+  (the cache's own count plus the sessions started on a day it does not hold), never once per worked
+  day; and with no date cut, messages and tool calls are the lifetime counters, because the parser's
+  `daily.messages` over-counts them (measured ~+45 % on "all time"). Only a bounded range reads the days.
   **The remaining artefact is the UTC day itself, and it is deliberate**: a `daily` key is a UTC day
   while an hour bucket is local, so at UTC-3 `Today` legitimately includes the previous evening's
   21:00-23:59. Every other figure under that filter has the same boundary; giving the chart alone a
