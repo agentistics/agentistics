@@ -1645,6 +1645,52 @@ describe('a day range cuts a DECLARED cost with its tokens (cutSessionUsage)', (
     expect(split[ocModel]?.opencode).toBeCloseTo(0.125, 10)
     expect(split['claude-sonnet-5-5']?.claude).toBeCloseTo(claudeDay, 10)
   })
+
+  // THE DEFECT: with NO project/harness filter the non-Claude addenda were built from the WHOLE
+  // sessions, so "one day" carried the lifetime tokens, cost and messages of every non-Claude session.
+  describe('the UNIFIED view (no project or harness filter) cuts non-Claude sessions too', () => {
+    const range = { dateRange: 'custom', customStart: '2026-09-05', customEnd: '2026-09-05', projects: [], models: [] } as unknown as import('@agentistics/core').Filters
+    const only = (harness: 'claude' | 'opencode') => ({ ...range, harnesses: [harness] }) as import('@agentistics/core').Filters
+    const ocOnly = { ...data, sessions: [opencode] } as import('@agentistics/core').AppData
+
+    test("one day is that day's tokens, cost, messages and activity", () => {
+      const d = computeDerivedStats(ocOnly, range)!
+      expect(totalTokens(d.tokenTotals)).toBe(50)
+      expect(d.totalCostUSD).toBeCloseTo(0.125, 10)
+      expect(calcCost(d.modelUsage[ocModel]!, ocModel)).toBeCloseTo(0.125, 10)
+      expect(d.totalMessages).toBe(2)
+      expect(d.totalSessions).toBe(1)
+      expect(d.heatmapData.reduce((n, h) => n + h.value, 0)).toBe(2)
+      expect(d.heatmapByHarness.opencode!.reduce((n, h) => n + h.value, 0)).toBe(2)
+      const days = Object.values(d.apiCostByDay.days.opencode!)
+      expect(days.reduce((n, e) => n + e.costUSD, 0)).toBeCloseTo(0.125, 10)
+      expect(days.reduce((n, e) => n + e.tokens, 0)).toBe(50)
+    })
+
+    test('the top total is the sum of the per-harness views', () => {
+      const unified = computeDerivedStats(data, range)!
+      const claudeView = computeDerivedStats(data, only('claude'))!
+      const ocView = computeDerivedStats(data, only('opencode'))!
+      expect(unified.totalCostUSD).toBeCloseTo(claudeView.totalCostUSD + ocView.totalCostUSD, 10)
+      expect(totalTokens(unified.tokenTotals)).toBe(totalTokens(claudeView.tokenTotals) + totalTokens(ocView.tokenTotals))
+      const perDay = Object.values(unified.apiCostByDay.days).flatMap(byDay => Object.values(byDay!))
+      expect(perDay.reduce((n, e) => n + e.costUSD, 0) + unified.apiCostByDay.undatedCostUSD).toBeCloseTo(unified.totalCostUSD, 10)
+    })
+
+    test('the filtered OpenCode view is unchanged', () => {
+      const d = computeDerivedStats(data, only('opencode'))!
+      expect(totalTokens(d.tokenTotals)).toBe(50)
+      expect(d.totalCostUSD).toBeCloseTo(0.125, 10)
+      expect(d.totalMessages).toBe(2)
+    })
+
+    test('an unbounded range still reports lifetime totals', () => {
+      const d = computeDerivedStats(ocOnly, { ...range, dateRange: 'all', customStart: '', customEnd: '' })!
+      expect(totalTokens(d.tokenTotals)).toBe(100)
+      expect(d.totalCostUSD).toBeCloseTo(0.25, 10)
+      expect(d.totalMessages).toBe(4)
+    })
+  })
 })
 
 describe('the activity calendar counts the days a session WORKED', () => {
