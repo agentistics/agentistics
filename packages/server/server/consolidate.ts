@@ -99,7 +99,23 @@ export async function writeConsolidated(sessions: SessionMeta[]): Promise<number
       return 1
     })
   }))
-  return counts.reduce<number>((a, b) => a + b, 0)
+  const written = counts.reduce<number>((a, b) => a + b, 0)
+  if (written > 0) await markStoreChanged()
+  return written
+}
+
+/**
+ * PERF.SERVIDOR-OCIOSO fase 3 (QA C2) — "this process changed the store": readers that keep a view of the WHOLE store
+ * (`loadConversations`) re-read it when this moves, instead of every 30 s on a timer (each re-read stats and copies
+ * ~5 000 records). It is a counter of THIS process's writes, deliberately not a file (a stamp file would be one more
+ * raw writer for `doors.lint` to pin): in the server — the process that builds and writes the store — the view follows
+ * every build that changed something; a process that never writes (the cockpit, the CLI) gets `null` and keeps its TTL.
+ */
+let storeWrites = 0
+async function markStoreChanged(): Promise<void> { storeWrites++ }
+/** The store's change stamp in this process, or `null` when this process has never written it. */
+export function storeChangeStamp(): string | null {
+  return storeWrites > 0 ? String(storeWrites) : null
 }
 
 /** One stored record, read and repaired — or the one remembered under the file's stamp. It is the

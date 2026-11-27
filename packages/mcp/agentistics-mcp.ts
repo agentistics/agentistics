@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { StaleAnswer, toolText, withStaleNote } from "./stale-note";
 import { liveDeliveryQuery } from "./live-delivery-args";
 import { deliveryCalendarQuery } from "./delivery-calendar-args";
 import { flowStatusRunId } from './flow-status'
@@ -178,10 +179,11 @@ async function analytics(tool: ProjectedTool, harness: string | undefined, from:
       if (!(err instanceof ProjectionUnavailable)) throw err;
     }
   }
-  return LEGACY_TOOLS[tool](await from.legacy(), harness);
+  const data = await from.legacy();
+  return withStaleNote(LEGACY_TOOLS[tool](data, harness), data);
 }
 
-const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
+const text = toolText;
 
 async function getPrefs() {
   return apiGet("/api/preferences");
@@ -1972,7 +1974,7 @@ async function callTool(
           legacy: () => apiGet("/api/data"),
           metrics: (q) => fetch(`${API}/api/runtime/metrics?${q}`),
         }), apiGet("/api/plan-limits")]);
-        return text(harnessesTool(rows, availability));
+        return text(rows instanceof StaleAnswer ? new StaleAnswer(harnessesTool(rows.value, availability), rows.note) : harnessesTool(rows, availability));
       }
 
       case "agentistics_plan_limits": {
@@ -2032,7 +2034,7 @@ async function callTool(
               ...(delivered.get(s.session_id) ? { deliveredStillOpen: delivered.get(s.session_id) } : {}),
             };
           });
-        return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+        return text(withStaleNote(rows, data));
       }
 
       case "agentistics_costs": {

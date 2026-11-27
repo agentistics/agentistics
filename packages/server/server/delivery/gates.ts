@@ -630,17 +630,17 @@ export function defaultGateFacts(): GateFacts {
   }
   return {
     blockedSubtasks: async () => {
-      const { loadTaskWorld } = await import('../sessions/task-source')
-      return blockedPiecesOf((await loadTaskWorld()).book)
+      const { loadTaskBoardShared } = await import('../sessions/task-source')
+      return blockedPiecesOf((await loadTaskBoardShared()).book)
     },
     pieceStatus: async id => {
-      const { loadTaskWorld } = await import('../sessions/task-source')
-      const { book } = await loadTaskWorld()
+      const { loadTaskBoardShared } = await import('../sessions/task-source')
+      const { book } = await loadTaskBoardShared()
       return book.subtasks.find(s => s.id === id)?.status ?? book.tasks.find(t => t.id === id)?.status ?? null
     },
     subtask: async id => {
-      const { loadTaskWorld } = await import('../sessions/task-source')
-      const w = await loadTaskWorld()
+      const { loadTaskBoardShared } = await import('../sessions/task-source')
+      const w = await loadTaskBoardShared()
       const s = w.book.subtasks.find(x => x.id === id)
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
@@ -668,8 +668,8 @@ export function defaultGateFacts(): GateFacts {
       return rows.map(b => ({ harness: b.harness, account: (b as { account?: string }).account ?? 'default', fiveHourPct: b.fiveHourPct, weekPct: b.weekPct, stale: b.stale }))
     },
     queueExtras: async id => {
-      const { loadTaskWorld } = await import('../sessions/task-source')
-      const { book } = await loadTaskWorld()
+      const { loadTaskBoardShared } = await import('../sessions/task-source')
+      const { book } = await loadTaskBoardShared()
       const s = book.subtasks.find(x => x.id === id)
       if (!s) return null
       const notes = book.comments.filter(c => c.subtaskId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))

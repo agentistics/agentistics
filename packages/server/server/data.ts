@@ -20,7 +20,7 @@ import { UUID_RE, decodeProjectDir, getProjectGitStats, getGitRemote, gcGitStats
 // here — the meta-session enrichment they served now runs inside `cachedEnrich`, which
 // reads the transcript once per file VERSION instead of once per build.
 import { parseSessionJsonl } from './jsonl'
-import { runHealthChecks, analyzeToolHealthIssues, analyzeCacheStaleness } from './health'
+import { runHealthChecks, runHealthChecksCached, analyzeToolHealthIssues, analyzeCacheStaleness } from './health'
 import { openParseCache, NOOP_PARSE_CACHE, type ParseCache } from './parse-cache'
 import { cachedParseSession, cachedEnrich } from './parse-cache-jsonl'
 
@@ -566,7 +566,7 @@ function revalidateInBackground(): void {
   if (_revalidating || _status === 'computing') return
   _revalidating = true
   void _buildApiResponse()
-    .then(result => { _promise = Promise.resolve(result); _resolvedAt = Date.now(); _status = 'done'; onFreshBuild(result) })
+    .then(result => { adoptBuild(result); _status = 'done'; onFreshBuild(result) })
     .catch(() => { /* keep serving the previous good result on failure */ })
     .finally(() => { _revalidating = false })
 }
@@ -582,8 +582,7 @@ export async function rebuildNow(): Promise<void> {
   _revalidating = true
   try {
     const result = await _buildApiResponse()
-    _promise = Promise.resolve(result)
-    _resolvedAt = Date.now()
+    adoptBuild(result)
     _status = 'done'
     onFreshBuild(result)
   } finally {
@@ -641,8 +640,85 @@ function newestFirst(a: SessionMeta, b: SessionMeta): number {
   return ka < kb ? -1 : ka > kb ? 1 : 0
 }
 
+/**
+ * PERF.SERVIDOR-OCIOSO — which CHANGES each build has read, counted as GENERATIONS (fase 3, QA R1).
+ *
+ * Every change the server's watcher sees bumps `_changeGen`; every build records the generation it started reading
+ * at (`BUILD_GEN`, stamped before its first read); `_doneGen` is the generation the result in `_promise` covers. A
+ * full reader (`buildApiResponse`, the REST/MCP `/api/data`) is owed every change marked BEFORE it arrived, so it
+ * waits until `_doneGen` reaches the generation it saw — joining a build in flight that already covers it (whoever
+ * started it: the scheduler's `rebuildNow`, `revalidateInBackground`, the first build, another reader), or else ONE
+ * on-demand build that starts after it. The fase 2 boolean flag was cleared when a build STARTED and nothing told a
+ * reader arriving mid-build that the build under way had started too early or too late for it (QA: a scheduler build
+ * in flight, a change, a read 1 ms later -> the read got the build that had not seen the change).
+ *
+ * `dataDirty()` — a change no build has started reading — paces the unwatched scheduler (`sse.ts`, 30–60 s with
+ * nobody connected). Only an UNWATCHED change (`markDataDirty`) makes the polling readers (`cachedApiResponse`: the
+ * browser's partial read, the live-sessions poll) kick an on-demand build: with a client connected the watched
+ * scheduler is already on its way, and a poll every few seconds must not bypass its 5 s gap.
+ */
+let _changeGen = 0
+let _startedGen = 0
+let _doneGen = 0
+let _kickOnRead = false
+let _inflight: { gen: number; done: Promise<unknown> } | null = null
+const BUILD_GEN = new WeakMap<object, number>()
+let _onDemand: Promise<void> | null = null
+/** An unwatched change: counted, the cache marked stale, and the next polling read starts the build. */
+export function markDataDirty(): void { _changeGen++; _kickOnRead = true; invalidateCache() }
+/** A watched change (a client is connected and the watched scheduler rebuilds): counted, nothing else. */
+export function noteDataChange(): void { _changeGen++ }
+export function dataDirty(): boolean { return _changeGen > _startedGen }
+/** Test seam: the three counters. */
+export function dataGenerations(): { change: number; started: number; done: number } {
+  return { change: _changeGen, started: _startedGen, done: _doneGen }
+}
+function adoptBuild(result: ApiResponse): void {
+  _promise = Promise.resolve(result)
+  _resolvedAt = Date.now()
+  _doneGen = Math.max(_doneGen, BUILD_GEN.get(result) ?? 0)
+}
+/** One on-demand build shared by every reader that arrives while it runs. */
+function rebuildOnDemand(): Promise<void> {
+  _onDemand ??= rebuildNow().finally(() => { _onDemand = null })
+  return _onDemand
+}
+
+/**
+ * Wait until the result covers generation `need`, or `deadline` passes. True when it does; false on the deadline or
+ * a failed build (the previous good result is then served). Each turn waits for ONE build that covers `need` — the
+ * one in flight when it started at or after `need`, otherwise an on-demand one, which `rebuildNow` starts only after
+ * whatever is in flight — so a steady stream of changes cannot keep a reader waiting for ever: it is owed the
+ * changes before it arrived, not the ones after.
+ */
+async function awaitGeneration(need: number, deadline: number): Promise<boolean> {
+  while (_doneGen < need) {
+    const left = deadline - Date.now()
+    if (left <= 0) return false
+    const covering = _inflight && _inflight.gen >= need ? _inflight.done : null
+    const p = covering ?? (_status === 'computing' && _promise ? _promise : rebuildOnDemand())
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const outcome = await Promise.race([
+      p.then(() => 'built' as const, () => 'failed' as const),
+      Number.isFinite(left) ? new Promise<'late'>(r => { timer = setTimeout(() => r('late'), left) }) : new Promise<never>(() => {}),
+    ]).finally(() => { if (timer) clearTimeout(timer) })
+    if (outcome !== 'built') return false
+  }
+  return true
+}
+
 export async function buildApiResponse(): Promise<ApiResponse> {
-  if (_status === 'computing') return _promise!
+  const need = _changeGen
+  if (_status === 'computing') {
+    const first = _promise!
+    const result = await first
+    if (_doneGen >= need) return result
+  }
+  // A change this reader could have seen is not in the result yet: build (or join the build that covers it) first.
+  if (_status === 'done' && _promise && _doneGen < need) {
+    await awaitGeneration(need, Infinity)
+    return _promise
+  }
   // Stale-while-revalidate: once a result exists, always serve it immediately. When it's older than
   // the TTL, refresh in the background — but never make the caller wait for that rebuild.
   if (_status === 'done' && _promise) {
@@ -657,6 +733,67 @@ export async function buildApiResponse(): Promise<ApiResponse> {
   return startFirstBuild()
 }
 
+/** How long a full `/api/data` read (the MCP, VS Code, agents) waits for a build before answering stale (QA R5):
+ *  a Mac measured a 69 s build, and an agent's tool call must not sit for a minute. */
+export const FULL_READ_WAIT_MS = 5_000
+
+/** A full read's answer: the data, and whether it is OLDER than a change the reader could have seen. */
+export interface BoundedRead { data: ApiResponse; stale: boolean; builtAt?: number }
+
+/**
+ * `buildApiResponse` with a deadline: waits at most `waitMs` for the build that covers every change marked before
+ * the call; past it, answers with the LAST result (or, during the very first build, the previous run's snapshot)
+ * and `stale: true` — the build keeps running and the next read gets it. With no result of any kind yet (first build
+ * on a machine with no snapshot) there is nothing to answer with, and it waits for the build.
+ */
+const statusNow = (): CacheStatus => _status
+
+export async function buildApiResponseWithin(waitMs: number = FULL_READ_WAIT_MS): Promise<BoundedRead> {
+  const need = _changeGen
+  const deadline = Date.now() + waitMs
+  if (_status === 'idle') void startFirstBuild().catch(() => undefined)
+  if (_status === 'computing' && _promise) {
+    const first = _promise
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const early = await Promise.race([
+      first.then(d => d, () => null),
+      new Promise<null>(r => { timer = setTimeout(() => r(null), waitMs) }),
+    ]).finally(() => clearTimeout(timer))
+    if (!early) {
+      const snap = await loadDataSnapshot()
+      // `statusNow()`: the status moved while this waited (TS narrows `_status` across the await).
+      if (snap && statusNow() !== 'done') return { data: snap, stale: true }
+      if (statusNow() !== 'done') return { data: await first, stale: false }
+    }
+  }
+  if (_status !== 'done' || !_promise) return { data: await buildApiResponse(), stale: false }
+  if (_doneGen < need) {
+    const fresh = await awaitGeneration(need, deadline)
+    if (!fresh) {
+      // The build that covers it keeps going (or is started now): the next read gets it.
+      if (_doneGen < need && !(_inflight && _inflight.gen >= need)) void rebuildOnDemand().catch(() => undefined)
+      return { data: await _promise, stale: true, builtAt: _resolvedAt }
+    }
+    return { data: await _promise, stale: false }
+  }
+  if (Date.now() - _resolvedAt >= _cacheTtlMs) revalidateInBackground()
+  return { data: await _promise, stale: false }
+}
+
+/**
+ * The cached result WITHOUT waiting for a change nobody has built yet: the previous build is served and the build
+ * is started (its `change` reaches connected clients when it lands). For readers that poll and can take one beat of
+ * staleness — the browser's `?partial=1` read and `/api/live-sessions`. Blocks only on the very first build.
+ */
+export async function cachedApiResponse(): Promise<ApiResponse> {
+  if (_status === 'done' && _promise) {
+    if (_kickOnRead && dataDirty()) void rebuildOnDemand().catch(() => undefined)
+    else if (Date.now() - _resolvedAt >= _cacheTtlMs) revalidateInBackground()
+    return _promise
+  }
+  return buildApiResponse()
+}
+
 function startFirstBuild(): Promise<ApiResponse> {
   for (const k of Object.keys(_progressSnapshot)) delete _progressSnapshot[k]
   _status = 'computing'
@@ -664,6 +801,7 @@ function startFirstBuild(): Promise<ApiResponse> {
     .then(result => {
       _status = 'done'
       _resolvedAt = Date.now()
+      _doneGen = Math.max(_doneGen, BUILD_GEN.get(result) ?? 0)
       _progressListeners.clear()
       onFreshBuild(result)
       return result
@@ -811,7 +949,7 @@ export function prepareQuickPayload(): void {
 
 /** What `/api/data?partial=1` answers. See the block comment above. */
 export async function buildApiResponseForClient(): Promise<ApiResponse> {
-  if ((_status === 'done' && _promise)) return buildApiResponse()
+  if ((_status === 'done' && _promise)) return cachedApiResponse()
   const full = buildApiResponse()
   full.catch(() => { /* surfaced through the race below or the next request */ })
   const early = await Promise.race([
@@ -1026,6 +1164,11 @@ export function applyArchivedStats(statsCache: StatsCache, snap: StatsCache): vo
 type ProgressFn = (stage: string, progress: number, detail?: string) => void
 
 async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiResponse> {
+  // This build reads the files as they are now: it covers every change counted up to this line (a change that lands
+  // after it is a newer generation, owed to the readers that arrive after it).
+  const gen = _changeGen
+  _startedGen = Math.max(_startedGen, gen)
+  _kickOnRead = false
   const timeoutMs = 300_000 // 5 minutes
 
   const buildPromise = async () => {
@@ -1043,21 +1186,30 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
     const metaRoots = fullMode ? [SESSION_META_DIR, ARCHIVE_SESSION_META_DIR] : [SESSION_META_DIR]
     const projectRoots = fullMode ? [PROJECTS_DIR, ARCHIVE_PROJECTS_DIR] : [PROJECTS_DIR]
 
+    // PERF.SERVIDOR-OCIOSO: the three reads are timed apart — a Mac reported `read 61602` and nothing said which.
+    const readStart = performance.now()
+    const readMs: Record<string, number> = {}
+    const timedRead = <T>(name: string, p: Promise<T>): Promise<T> => p.then(v => { readMs[name] = performance.now() - readStart; return v })
     const [statsCache, metaMap, healthIssues] = await Promise.all([
-      safeReadJson<StatsCache>(STATS_CACHE_FILE)
+      timedRead('statsCache', safeReadJson<StatsCache>(STATS_CACHE_FILE)
         .then(async v => {
           const sc = sanitizeStatsCache(v ?? ({} as StatsCache))
           await mergeArchivedStatsCache(sc, fullMode)
           onProgress('statsCache', 1)
           return sc
-        }),
-      loadSessionMetas(metaRoots)
-        .then(v => { onProgress('sessions', 1, String(v.size)); return v }),
-      runHealthChecks()
-        .then(v => { onProgress('health', 1); return v }),
+        })),
+      timedRead('metas', loadSessionMetas(metaRoots)
+        .then(v => { onProgress('sessions', 1, String(v.size)); return v })),
+      // The server reuses the checks for a minute and refreshes them in the background (`runHealthChecksCached`);
+      // the list is COPIED because this build appends its own findings to it.
+      timedRead('health', (_cacheTtlMs === WATCHED_CACHE_TTL_MS ? runHealthChecksCached() : runHealthChecks())
+        .then(v => { onProgress('health', 1); return [...v] })),
     ])
 
     timer.mark('read')
+    if (performance.now() - readStart >= 2_000) {
+      console.log(`[data] slow read: ${Object.entries(readMs).map(([k, ms]) => `${k} ${Math.round(ms)}`).join(', ')} ms (${metaMap.size} session metas)`)
+    }
     onProgress('projects', 0)
     const knownIds = new Set(metaMap.keys())
     const parseCache = PARSE_CACHE_ENABLED ? await openParseCache() : NOOP_PARSE_CACHE
@@ -1357,7 +1509,18 @@ async function _buildApiResponseCore(onProgress: ProgressFn): Promise<ApiRespons
   // `withTimeout`, never a bare `Promise.race` against `setTimeout`: the bare form left the 5-minute
   // timer armed after every build, and its closure kept that build's whole ApiResponse reachable
   // until it fired — the leak behind the 7.4 GB OOM of 2026-09-26. See `with-timeout.ts`.
-  return withTimeout(buildPromise(), timeoutMs, 'Request timed out after 5 minutes')
+  const done = withTimeout(buildPromise(), timeoutMs, 'Request timed out after 5 minutes')
+    .then(result => {
+      // Adopted HERE, before anyone awaiting this build resumes: a reader woken by it must find the result it covers
+      // already in `_promise` (each caller adopts again; it is idempotent).
+      BUILD_GEN.set(result, gen)
+      adoptBuild(result)
+      return result
+    })
+  const flight = { gen, done }
+  _inflight = flight
+  void done.finally(() => { if (_inflight === flight) _inflight = null }).catch(() => undefined)
+  return done
 }
 
 async function _buildApiResponse(): Promise<ApiResponse> {

@@ -596,9 +596,11 @@ async function scanMacProcessesWithHarnessIndex(): Promise<{
   procs: HarnessProcess[]
   unavailable: LiveUnavailableReason | null
 }> {
-  const { scanMacProcesses } = await import('./macos-processes-io')
+  const { scanMacProcesses, runAsync } = await import('./macos-processes-io')
   const t0 = performance.now()
-  const result = await scanMacProcesses()
+  let children = 0
+  const result = await scanMacProcesses(Date.now(), (argv, ms) => { children++; return runAsync(argv, ms) })
+  reportScanFacts(result.foreignPids, children)
   // MAC.OPENCODE-MUDO: the one line the owner can send from a Mac when the fleet is slow — how long the sweep took
   // and how much it found. Logged only when it is slow enough to matter.
   const ms = Math.round(performance.now() - t0)
@@ -685,15 +687,15 @@ async function linkOpencodeTuis(procs: HarnessProcess[]): Promise<void> {
 /** Read every running harness process (Linux /proc, macOS `ps`+`lsof`): which harness it is, its
  *  cwd, the session it resumed when argv says so, and when it started. [] on any other platform,
  *  or when this platform's own process source could not be read. */
-export async function scanProcesses(): Promise<{
+export async function scanProcesses(reason: ScanReason = 'other'): Promise<{
   procs: HarnessProcess[]
   unavailable: LiveUnavailableReason | null
 }> {
-  if (process.platform === 'darwin') return sharedScanOf(scanMacProcessesWithHarnessIndex)
+  if (process.platform === 'darwin') return sharedScanOf(scanMacProcessesWithHarnessIndex, Date.now(), reason)
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }
-  return sharedLinuxScan()
+  return sharedLinuxScan(reason)
 }
 
 /**
@@ -704,26 +706,90 @@ export async function scanProcesses(): Promise<{
  */
 const SCAN_SHARE_MS = 1_000
 type ScanResult = { procs: HarnessProcess[]; unavailable: LiveUnavailableReason | null }
-let sharedScan: { atMs: number; p: Promise<ScanResult> } | null = null
+let sharedScan: { atMs: number; p: Promise<ScanResult>; durationMs: number } | null = null
 /**
  * One sweep shared by every caller inside `SCAN_SHARE_MS` and by every caller while it is in flight — on BOTH
  * platforms. MAC.OPENCODE-MUDO: the macOS sweep (`ps` + several `lsof`) was run once per caller, unshared, by the
  * fleet poll, `/api/data`, the memory probe and the live claims alike; on a Mac each one costs seconds, so a poll
  * that started a new sweep before the last one ended never caught up and the fleet stopped answering.
  */
-export function sharedScanOf(scan: () => Promise<ScanResult>, nowMs: number = Date.now()): Promise<ScanResult> {
-  if (sharedScan && (nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs || inFlight.has(sharedScan.p))) return sharedScan.p
+export function sharedScanOf(scan: () => Promise<ScanResult>, nowMs: number = Date.now(), reason: ScanReason = 'other'): Promise<ScanResult> {
+  const shared = sharedScan
+  if (shared && (inFlight.has(shared.p) || (nowMs >= shared.atMs && nowMs < shared.atMs + shared.durationMs + scanShareWindowMs(shared.durationMs)))) {
+    scanStats.shared++
+    return shared.p
+  }
+  const started = performance.now()
   const p = scan()
-  sharedScan = { atMs: nowMs, p }
+  const entry = { atMs: nowMs, p, durationMs: 0 }
+  sharedScan = entry
   inFlight.add(p)
-  void p.then(() => { inFlight.delete(p) }, () => { inFlight.delete(p); if (sharedScan?.p === p) sharedScan = null })
+  void p.then(r => {
+    inFlight.delete(p)
+    entry.durationMs = performance.now() - started
+    noteScan(reason, entry.durationMs, r)
+  }, () => { inFlight.delete(p); if (sharedScan?.p === p) sharedScan = null })
   return p
 }
 const inFlight = new Set<Promise<ScanResult>>()
 /** Test seam: forget the shared sweep. */
-export function resetSharedScan(): void { sharedScan = null; inFlight.clear() }
-function sharedLinuxScan(): Promise<ScanResult> {
-  return sharedScanOf(() => scanLinuxProcesses())
+export function resetSharedScan(): void { sharedScan = null; inFlight.clear(); resetScanStats() }
+
+/**
+ * PERF.SERVIDOR-OCIOSO — how long a FINISHED sweep keeps answering, after it ends: twice as long as it took, never
+ * less than `SCAN_SHARE_MS`, never more than `SCAN_SHARE_MAX_MS`. A 25 ms Linux sweep keeps the 1 s window exactly; a
+ * 6 s macOS sweep (lsof under memory pressure) is not started again for 12 s, so slow sweeps can no longer run back to
+ * back — the shape the owner's Mac showed (122 sweeps in 160 log lines, 2–39 s each). PURE.
+ */
+export const SCAN_SHARE_MAX_MS = 15_000
+export function scanShareWindowMs(lastDurationMs: number): number {
+  return Math.min(SCAN_SHARE_MAX_MS, Math.max(SCAN_SHARE_MS, 2 * Math.max(0, lastDurationMs)))
+}
+
+/** Who asked for a sweep — the line below says which caller drives them. */
+export type ScanReason = 'fleet' | 'data' | 'memory' | 'claims' | 'agy' | 'other'
+interface ScanStats {
+  sinceMs: number; scans: number; shared: number; totalMs: number; maxMs: number
+  procs: number; harness: number; children: number; byReason: Partial<Record<ScanReason, number>>
+}
+const SCAN_LOG_EVERY_MS = 10 * 60_000
+function freshStats(nowMs: number): ScanStats { return { sinceMs: nowMs, scans: 0, shared: 0, totalMs: 0, maxMs: 0, procs: 0, harness: 0, children: 0, byReason: {} } }
+let scanStats: ScanStats = freshStats(Date.now())
+function resetScanStats(): void { scanStats = freshStats(Date.now()) }
+/** The host's process count and the children a sweep started, reported by the platform reader (macOS: ps/lsof). */
+let lastScanFacts: { total: number; children: number } = { total: 0, children: 0 }
+export function reportScanFacts(total: number, children: number): void { lastScanFacts = { total, children } }
+
+/**
+ * PURE. The one low-volume line about sweeps: how many ran, how long, over how many processes, finding how many
+ * harnesses, starting how many children, and who asked. `null` when nothing ran in the period.
+ */
+export function scanSummaryLine(s: ScanStats, nowMs: number): string | null {
+  if (s.scans === 0) return null
+  const mins = Math.max(1, Math.round((nowMs - s.sinceMs) / 60_000))
+  const by = Object.entries(s.byReason).map(([k, v]) => `${k}=${v}`).join(' ')
+  return `[live-sessions] process sweeps in ${mins} min: ${s.scans} run (${s.shared} shared), avg ${Math.round(s.totalMs / s.scans)} ms, max ${Math.round(s.maxMs)} ms, last ${s.procs} processes / ${s.harness} harness, ${s.children} child processes; asked by ${by}`
+}
+
+function noteScan(reason: ScanReason, ms: number, r: ScanResult): void {
+  const s = scanStats
+  s.scans++
+  s.totalMs += ms
+  s.maxMs = Math.max(s.maxMs, ms)
+  s.procs = lastScanFacts.total
+  s.harness = r.procs.length
+  s.children += lastScanFacts.children
+  s.byReason[reason] = (s.byReason[reason] ?? 0) + 1
+  lastScanFacts = { total: 0, children: 0 }
+  const nowMs = Date.now()
+  if (nowMs - s.sinceMs >= SCAN_LOG_EVERY_MS) {
+    const line = scanSummaryLine(s, nowMs)
+    if (line) console.log(line)
+    scanStats = freshStats(nowMs)
+  }
+}
+function sharedLinuxScan(reason: ScanReason): Promise<ScanResult> {
+  return sharedScanOf(() => scanLinuxProcesses(), Date.now(), reason)
 }
 
 /** Linux reader with an injectable procfs root so every process rule can be tested with fixtures. */
@@ -814,6 +880,7 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   }))
   // Forget what is gone, so the memo is as large as the process table and no larger.
   for (const k of notHarness) if (!seen.has(k)) notHarness.delete(k)
+  if (procRoot === '/proc') reportScanFacts(foreignPids, 0)
   // opencode: the shared link (1.x log, 2.x tabs record + service) — only on the real /proc, a fixture root has
   // no matching log or service.
   if (procRoot === '/proc') await linkOpencodeTuis(procs)
@@ -1080,7 +1147,7 @@ export function debounceExternalRows(rows: UnmatchedProcess[], nowMs: number): U
 
 /** Read the processes and produce the full snapshot in one call. */
 export async function getLiveSnapshot(sessions: SessionMeta[]): Promise<LiveSnapshot> {
-  const { procs, unavailable } = await scanProcesses()
+  const { procs, unavailable } = await scanProcesses('data')
   const snap = resolveLiveSnapshot(procs, sessions)
 
   const liveSessionActivities: Record<string, 'working' | 'waiting' | 'waiting-approval' | 'exited'> = {}

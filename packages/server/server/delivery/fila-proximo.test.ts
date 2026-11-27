@@ -82,7 +82,7 @@ describe('fila-proximo — the flow', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'fila-')) })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
-  interface World { autonomous: boolean; workers: number; priorities: Record<string, string>; leaderAlive: boolean; spawnOk: boolean; memory: number }
+  interface World { autonomous: boolean; workers: number; priorities: Record<string, string>; leaderAlive: boolean; spawnOk: boolean; memory: number; fiveHourPct?: number; gateRuns?: number }
 
   function setup(over: Partial<World> = {}) {
     const w: World = { autonomous: true, workers: 0, priorities: { a: 'low', b: 'medium', c: 'urgent' }, leaderAlive: true, spawnOk: true, memory: 8 * 1024 ** 3, ...over }
@@ -98,8 +98,8 @@ describe('fila-proximo — the flow', () => {
       staged: { prompt: `brief ${id}`, harness: 'claude', model: 'claude-sonnet-5-5', effort: 'high', account: 'acc_1', cwd: '/r' },
     }
     const facts: GateFacts = {
-      subtask: async id => sub(id), sessions: async () => sessions(),
-      budgets: async () => [{ harness: 'claude', account: 'acc_1', fiveHourPct: 10, weekPct: 10, stale: false }],
+      subtask: async id => sub(id), sessions: async () => { w.gateRuns = (w.gateRuns ?? 0) + 1; return sessions() },
+      budgets: async () => [{ harness: 'claude', account: 'acc_1', fiveHourPct: w.fiveHourPct ?? 10, weekPct: 10, stale: false }],
       memoryBytes: async () => w.memory, topCap: async () => 9,
       git: async () => '', gh: async () => '{}',
     }
@@ -280,6 +280,72 @@ describe('fila-proximo — the flow', () => {
     await t.svc.queueNext()
     expect(t.asks()).toHaveLength(1)
     expect(t.asks()[0]!.text).toContain('Peça c')
+  })
+
+  test('PERF.SERVIDOR-OCIOSO: a full machine is judged ONCE — the next ticks neither re-ask the slot nor log it; a session ending frees the piece at once', async () => {
+    const t = setup({ workers: 4 })
+    await t.queue(['a', 'c'])
+    const first = await t.svc.queueNext()
+    expect(first.actions.filter(a => a.startsWith('fila-sem-vaga')).length).toBeGreaterThan(0)
+    const verdictAt = (await t.svc.get('c'))?.gates.vaga?.at
+    for (let i = 0; i < 5; i++) {
+      t.advance(60_000)
+      const out = await t.svc.queueNext()
+      expect(out.actions.filter(a => a.startsWith('fila-sem-vaga'))).toEqual([])
+    }
+    expect((await t.svc.get('c'))?.gates.vaga?.at).toBe(verdictAt) // not rewritten every minute
+    // a worker ends (the kick runs the flow right then): the alive set changed, so the slot is asked again NOW
+    t.w.workers = 3
+    t.advance(1_000)
+    await t.svc.queueNext()
+    expect(t.asks()).toHaveLength(1)
+    expect(t.asks()[0]!.text).toContain('Peça c')
+  })
+
+  test('PERF.SERVIDOR-OCIOSO fase 3 (QA R2): memory freed re-judges on the next tick, not after 10 minutes', async () => {
+    const t = setup({ workers: 0, memory: 1 * 1024 ** 3 })
+    await t.queue(['c'])
+    expect((await t.svc.queueNext()).actions).toContain('fila-sem-vaga c')
+    t.advance(60_000)
+    expect((await t.svc.queueNext()).actions.filter(a => a.startsWith('fila-sem-vaga'))).toEqual([]) // nothing changed
+    t.w.memory = 8 * 1024 ** 3
+    t.advance(60_000)
+    await t.svc.queueNext()
+    expect(t.asks()).toHaveLength(1)
+    expect(t.asks()[0]!.text).toContain('Peça c')
+  })
+
+  test('PERF.SERVIDOR-OCIOSO fase 3 (QA R2): a plan budget back under its ceiling re-judges on the next tick', async () => {
+    const t = setup({ workers: 0, fiveHourPct: 90 })
+    await t.queue(['c'])
+    expect((await t.svc.queueNext()).actions).toContain('fila-sem-vaga c')
+    t.advance(60_000)
+    expect((await t.svc.queueNext()).actions.filter(a => a.startsWith('fila-sem-vaga'))).toEqual([])
+    t.w.fiveHourPct = 40
+    t.advance(60_000)
+    await t.svc.queueNext()
+    expect(t.asks()).toHaveLength(1)
+  })
+
+  test('PERF.SERVIDOR-OCIOSO fase 3: an unchanged no-slot tick runs no slot gate at all (the print is read from the tick facts)', async () => {
+    const t = setup({ workers: 4 })
+    await t.queue(['c'])
+    await t.svc.queueNext()
+    t.advance(60_000)
+    const before = t.w.gateRuns ?? 0
+    await t.svc.queueNext()
+    // one sessions() read for the tick itself; none for a slot gate
+    expect((t.w.gateRuns ?? 0) - before).toBe(1)
+  })
+
+  test('PERF.SERVIDOR-OCIOSO: with nothing changing, a no-slot verdict is still re-asked after 10 minutes (budgets move)', async () => {
+    const t = setup({ workers: 4 })
+    await t.queue(['c'])
+    await t.svc.queueNext()
+    t.advance(9 * 60_000)
+    expect((await t.svc.queueNext()).actions.filter(a => a.startsWith('fila-sem-vaga'))).toEqual([])
+    t.advance(60_000)
+    expect((await t.svc.queueNext()).actions.filter(a => a.startsWith('fila-sem-vaga'))).toEqual(['fila-sem-vaga c'])
   })
 
   test('two questions never promise the same last slot', async () => {

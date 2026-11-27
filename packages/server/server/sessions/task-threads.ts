@@ -20,7 +20,7 @@ import {
   canSessionOpenThread, planQueuedFlush, planThreadFanout, threadDeliveryText, withParticipant,
   type CommentKind, type FleetRowLike, type ThreadDelivery, type ThreadKind, type ThreadParticipant,
 } from '@agentistics/core'
-import { loadTaskBoard } from './task-source'
+import { loadTaskBoard, loadTaskBoardShared } from './task-source'
 import { findTask } from './task-report'
 import { newCommentId, type TaskComment, type TaskThread } from './task-model'
 import { planCommentTarget } from './task-comment'
@@ -211,7 +211,7 @@ export async function threadAction(
  * Returns how many went.
  */
 export async function flushQueuedDeliveries(lang: CliLang): Promise<number> {
-  const w = await loadTaskBoard()
+  const w = await loadTaskBoardShared() // the 30 s flush: one board read per change, not per tick (QA C4)
   const pending = w.book.comments.filter(c => c.deliveries?.some(d => d.state === 'queued'))
   if (pending.length === 0) return 0
   const rows = await fleetRows(lang).catch(() => [])

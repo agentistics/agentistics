@@ -81,7 +81,7 @@ export async function agyLiveFrom(src: AgyLiveSources): Promise<boolean> {
 const defaultAgyLive = (): Promise<boolean> => agyLiveFrom({
   scanned: async () => {
     const { scanProcesses } = await import('./live-sessions')
-    return (await scanProcesses()).procs.some(p => p.harness === 'antigravity')
+    return (await scanProcesses('agy')).procs.some(p => p.harness === 'antigravity')
   },
   managedRunning: async () => {
     const [{ readRegistry }, { resolveBackend }, { reconcileSessions }] = await Promise.all([

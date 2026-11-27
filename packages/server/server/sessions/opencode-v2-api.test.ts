@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import {
   isOpencodeV2, linkOpencodeV2Processes, opencodeStateDir, opencodeTabSessions, parseOpencodeTabs, readOpencodeTabs, opencodeV2Activity, opencodeV2Status, parseActive,
-  parseServiceRecord, parseSessions, readOpencodeV2ProcessSessions, readOpencodeV2Sessions, resetOpencodeV2, type OpencodeV2Session,
+  nextV2Backoff, parseServiceRecord, parseSessions, readOpencodeV2ProcessSessions, readOpencodeV2Sessions, resetOpencodeV2, V2_BACKOFF_MAX_MS, type OpencodeV2Session,
 } from './opencode-v2-api'
 import { analyzeOpencodeV2Status } from '../health'
 import type { HealthIssue } from '@agentistics/core'
@@ -110,6 +110,35 @@ describe('IO through a fake fetch', () => {
     const io = { stateDir: state(), now: () => 1000, fetch: () => { calls++; return Promise.reject(new Error('down')) } }
     await readOpencodeV2Sessions(io); await readOpencodeV2Sessions(io)
     expect(calls).toBe(1)
+  })
+  test('PERF.SERVIDOR-OCIOSO: a dead service backs off 2.5 s → 5 s → … → 5 min; a new service.json is asked at once', async () => {
+    let calls = 0
+    let t = 1_000
+    const dir = state()
+    const io = { stateDir: dir, now: () => t, fetch: () => { calls++; return Promise.reject(new Error('down')) } }
+    await readOpencodeV2Sessions(io) // fails: backoff 2.5 s
+    t += 2_000; await readOpencodeV2Sessions(io)
+    expect(calls).toBe(1)
+    t += 600; await readOpencodeV2Sessions(io) // 2.6 s: asked, fails again → 5 s
+    expect(calls).toBe(2)
+    t += 4_000; await readOpencodeV2Sessions(io)
+    expect(calls).toBe(2)
+    t += 1_100; await readOpencodeV2Sessions(io)
+    expect(calls).toBe(3)
+    // the service restarted on another port: asked at once
+    writeFileSync(join(dir, 'service.json'), JSON.stringify({ id: 'y', version: '2.2.5', url: 'http://127.0.0.1:50000', pid: 2, password: 'pw2' }))
+    t += 100; await readOpencodeV2Sessions(io)
+    expect(calls).toBe(4)
+    expect(nextV2Backoff(undefined)).toBe(2_500)
+    expect(nextV2Backoff(4 * 60_000)).toBe(V2_BACKOFF_MAX_MS)
+    // an answer forgets the backoff
+    let ok = false
+    const io2 = { stateDir: dir, now: () => t, fetch: () => { calls++; return ok ? res({ data: [] }) : Promise.reject(new Error('down')) } }
+    t += 10_000; ok = true; await readOpencodeV2Sessions(io2)
+    ok = false; t += 3_000; await readOpencodeV2Sessions(io2)
+    const before = calls
+    t += 2_600; await readOpencodeV2Sessions(io2) // back to the 2.5 s floor, not the doubled delay
+    expect(calls).toBe(before + 1)
   })
   test('pages until a short page', async () => {
     const mk = (n: number) => ({ id: `ses_${n}`, location: { directory: '/d' }, time: { created: n, updated: n } })
