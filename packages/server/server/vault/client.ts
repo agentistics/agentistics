@@ -29,6 +29,14 @@ export async function remotePrefsTokens(prefsFile: string, next: Record<string, 
   return (r.reply as unknown as { stripped: Record<string, unknown> }).stripped
 }
 
+/** What `agentop cloud` needs from the vault side (cli-cloud.ts reaches no socket itself). */
+export function cloudCliIo() {
+  return {
+    ask: async (req: { op: string } & Record<string, unknown>) => (await askVault(req, { timeoutMs: 90_000 }))?.reply ?? null,
+    serviceDown: refusal('service-down').message,
+  }
+}
+
 export type RemoteGithubConfig =
   | { state: 'absent' }
   | { state: 'refused'; sentence: string }

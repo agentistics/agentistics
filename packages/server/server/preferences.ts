@@ -86,6 +86,8 @@ export interface Preferences {
   checkinDefaults?: import('./checkin').CheckinConfig
   /** Opt out of automatic managed briefing skill updates at server start. */
   briefingAutoInstall?: boolean
+  /** Agentistics Cloud. No default URL: absent means every `agentop cloud` command says so and stops. */
+  cloud?: { url?: string }
   /** Additional filesystem roots offered by the session/project discovery wizard. */
   scanRoots?: string[]
   /** Anonymous daily usage signal. Absent means on by default. */

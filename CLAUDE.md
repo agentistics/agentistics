@@ -33,6 +33,7 @@ packages/
   tui/      (@agentistics/tui)    — Ink (React) terminal dashboard + the `agentop` control center
   vscode/   (agentistics-vscode)  — the VS Code extension: a CLIENT of the local server, no more
   vault/    (@agentistics/vault)  — secrets at rest: sealed format, AEAD, HKDF, protector adapters, migration (pure; NOT in core, the web bundle imports core)
+  contract/ (@agentistics/contract) — the public ↔ Agentistics Cloud machine contract (OpenAPI + fixtures, locked bytes: changed only by a patch from the Cloud side)
   desktop/                        — Tauri v2 Windows installer (spawns agentop as sidecar)
 ```
 
@@ -65,6 +66,10 @@ packages/server/bin/cli.ts  (binary entry point — agentop)
   │                          SessionStart HOOK that injects the live fleet, and a Stop HOOK that
   │                          feeds the event channel. Explicit, idempotent, exactly reversible;
   │                          see docs/claude-integration.md)
+  ├── agentop cloud …      → server/cli-cloud.ts (login/status/logout against Agentistics Cloud;
+  │                          no default URL: `AGENTISTICS_CLOUD_URL` or `preferences.cloud.url`. The CLI
+  │                          is a vault client, so pairing runs in the SERVICE: `cloud-*` ops on
+  │                          vault.sock → server/cloud/ (docs/cloud-pairing.md))
   ├── agentop events …     → server/cli-events.ts (watch/unwatch/status/tail/run/emit/test — the
   │                          EVENT CHANNEL: a state TRANSITION reaches a person and the assistant
   │                          orchestrating the fleet. See `events/` below and docs/session-events.md.

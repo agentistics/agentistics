@@ -244,9 +244,14 @@ Examples:
  * every build, with the engine's own summary where it offers one and `(official build)` where it
  * does not — hiding them would make the documentation lie to a community user.
  */
+// Its own literal: HELP above is pinned as a whole by the delivery guard inventory.
+const CLOUD_HELP = `  cloud         Pair this machine with Agentistics Cloud ('cloud login | status | logout';
+                needs a Cloud URL, and the agentop service running)
+`
+
 async function helpText(): Promise<string> {
   const { engineHelpSection } = await import('../server/engine/cli.ts')
-  return HELP.replace('__ENGINE_VERBS__', await engineHelpSection())
+  return HELP.replace('  events        Be told', `${CLOUD_HELP}  events        Be told`).replace('__ENGINE_VERBS__', await engineHelpSection())
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +465,13 @@ if (command === 'experimental') {
 }
 
 if (command === 'env') process.exit(await (await import('../server/cli-env.ts')).runEnv(args, { io: await (await import('../server/flows/host-ops.ts')).envCliIo() }))
+
+if (command === 'cloud') {
+  const { runCloud } = await import('../server/cli-cloud.ts')
+  const { cloudCliIo } = await import('../server/vault/client.ts')
+  const { readPreferences } = await import('../server/preferences.ts')
+  process.exit(await runCloud(args, { ...cloudCliIo(), prefs: readPreferences }))
+}
 
 if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
 

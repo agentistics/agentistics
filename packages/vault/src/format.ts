@@ -30,6 +30,9 @@ export const HKDF_INFO_PREFIX = 'agentistics/vault/v1/'
 export type HostPurpose =
   | 'github-backup'
   | 'mobile-push-vapid'
+  /** The machine's Cloud keys (Ed25519 signing + X25519 envelope) and, separately, its Cloud credential. */
+  | 'cloud-identity'
+  | 'cloud-credential'
 export type EnginePurpose = `engine/${string}`
 /** SECRETS.4 §1.1 — the Cloud runner's own secrets, sealed ONLY under the runner scope's DEK. */
 export type RunnerPurpose = `cloud-runner/${string}`
@@ -41,7 +44,7 @@ export type Purpose = HostPurpose | EnginePurpose | HumanExtraPurpose | RunnerPu
 export type VaultScope = 'human' | 'cloud-runner'
 export const HUMAN_EXTRA_PURPOSES: readonly HumanExtraPurpose[] = ['attachment', 'vault/totp-seed', 'vault/personal']
 
-export const HOST_PURPOSES: readonly HostPurpose[] = ['github-backup', 'mobile-push-vapid']
+export const HOST_PURPOSES: readonly HostPurpose[] = ['github-backup', 'mobile-push-vapid', 'cloud-identity', 'cloud-credential']
 
 /** PURE. Is `p` a purpose this format accepts at all? */
 export function isPurpose(p: unknown): p is Purpose {

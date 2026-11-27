@@ -24,6 +24,8 @@ text** ([§7a](#7a-secrets-at-rest--every-secret-is-sealed-never-plain-text-unde
 |---|---|---|
 | GitHub PAT for versioned backups | `github-backup.sealed` | `github-backup` |
 | Web-push VAPID key | `mobile-push-vapid.sealed` | `mobile-push-vapid` |
+| Agentistics Cloud machine keys (Ed25519 signing, X25519 envelope) | `cloud-identity.sealed` | `cloud-identity` |
+| Agentistics Cloud refresh token, bound to the signing key | `cloud-credential.sealed` | `cloud-credential` |
 | Provider API keys of the native runtime | `provider-keys/<id>.sealed` (the engine, through engine-api 1.5 `secrets`) | `engine/provider-key` |
 | The person's own secrets (vault) | `vault/` | `vault/personal`, `vault/totp-seed`, `attachment` |
 

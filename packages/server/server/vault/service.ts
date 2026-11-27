@@ -63,6 +63,8 @@ export function displayPath(p: string): string {
 const RESTORE_ROW: Record<string, string> = {
   'github-backup': '.agentistics/github-backup.',
   'engine/provider-key': '.agentistics/provider-keys',
+  'cloud-identity': '.agentistics/cloud-identity.',
+  'cloud-credential': '.agentistics/cloud-credential.',
 }
 
 /**
