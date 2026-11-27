@@ -38,6 +38,8 @@ export interface FleetHubRow {
   harness?: HarnessId
   conversationId?: string
   activity?: SessionActivity
+  /** A finished turn waiting on its workers (`SessionView.waitingOnWorkers`). */
+  waitingOnWorkers?: number
   dialogOptions?: readonly { label: string; freeText?: boolean }[]
   dialogUnreadable?: unknown
 }
@@ -90,7 +92,8 @@ export function createFleetHub(o: { warn?: (m: string) => void } = {}): FleetHub
       for (const [id, n] of notes) if (nowMs - n.atMs > ANSWER_NOTE_TTL_MS) notes.delete(id)
       const byId = new Map(rows.map(r => [r.id, r]))
       // Only what confirmation needs: an id and an activity (plus what the event type requires).
-      const candidates: EventCandidate[] = rows.map(r => ({ id: r.id, cwd: '', ...(r.activity ? { activity: r.activity } : {}) }))
+      // Same reading as the event producer: a turn waiting on its workers is not a "waiting" transition.
+      const candidates: EventCandidate[] = rows.map(r => ({ id: r.id, cwd: '', ...(r.activity ? { activity: r.activity === 'waiting' && r.waitingOnWorkers ? 'working' as const : r.activity } : {}) }))
       const nowIso = new Date(nowMs).toISOString()
       const plan = planEvents({ memory, sessions: candidates, nowIso })
       memory = plan.memory

@@ -5,7 +5,7 @@
 import { versionedAsset } from './brand'
 import { getReopening } from './reopeningStore'
 import type { SessionMeta } from '@agentistics/core'
-import { isNayCwd, sessionLabel } from '@agentistics/core'
+import { isNayCwd, ownerState, sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
 import { clampVolume } from './soundVolume'
 import { findNaySound, isNaySoundId, type NaySoundId } from './notificationSounds'
@@ -593,15 +593,17 @@ function staleText(name: string, place: string, waited: string, lang: 'pt' | 'en
  * would make the module remember something across a page it no longer belongs to.
  */
 export function fleetActivityStates(
-  rows: readonly { id: string; state: string }[],
+  rows: readonly { id: string; state: string; waitingOnWorkers?: number }[],
 ): Record<string, SessionActivity> {
   const out: Record<string, SessionActivity> = {}
   for (const r of rows) {
     // Only the four this feature has words for. `lost`, `closed` and `unknown` are not events that
     // happened to a person — they are what a row IS — and inventing a sentence for them would put
     // "your session is unknown" on someone's desktop.
-    if (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval' || r.state === 'idle' || r.state === 'exited') {
-      out[r.id] = r.state
+    // A turn waiting on its workers reads as `idle` (`ownerState`): nothing to announce.
+    const state = ownerState(r)
+    if (state === 'working' || state === 'waiting' || state === 'waiting-approval' || state === 'idle' || state === 'exited') {
+      out[r.id] = state
     }
   }
   return out
@@ -619,7 +621,15 @@ let unconfirmed: Record<string, SessionActivity> = {}
 /** Observed terminal transitions awaiting an in-flight switch, including a vanished source. */
 const pendingExits = new Map<string, FleetNotifyRow>()
 
-type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
+type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string; state: string; waitingOnWorkers?: number; title?: string; cwd?: string; harness?: string; model?: string }
+
+/**
+ * The rows the "not opened for a while" clocks read: a turn waiting on its workers reads as `idle`
+ * (`ownerState`), so its clock never runs while the workers do and starts when the last one stops.
+ */
+export function staleClockRows<R extends { state: string; waitingOnWorkers?: number }>(rows: readonly R[]): Array<Omit<R, 'state'> & { state: string }> {
+  return rows.map(r => ({ ...r, state: ownerState(r) }))
+}
 
 /**
  * "Not opened for a while": read this poll into the store's waiting clocks and raise each session
@@ -628,7 +638,7 @@ type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string;
  */
 function raiseStale(rows: readonly FleetNotifyRow[], lang: 'pt' | 'en'): void {
   const settings = getNotificationSettings()
-  const due = observeFleet(rows, settings.enabled && settings.events.stale ? settings.staleAfterMin : 0)
+  const due = observeFleet(staleClockRows(rows), settings.enabled && settings.events.stale ? settings.staleAfterMin : 0)
   for (const c of due) {
     const r = rows.find(x => x.id === c.id)
     if (!r) continue

@@ -28,6 +28,22 @@ describe('saying nothing', () => {
   })
 })
 
+describe('a leader waiting on its workers', () => {
+  test('is not counted as waiting on a person, and says what it waits on', () => {
+    const out = plan([
+      s({ id: 'leadlead11', activity: 'waiting', waitingOnWorkers: 1 }),
+      s({ id: 'workwork22', activity: 'working' }),
+    ])!
+    expect(out).not.toContain('waiting on a person')
+    expect(out).toContain('waiting on workers')
+  })
+
+  test('without busy workers it is the person\'s again', () => {
+    expect(plan([s({ id: 'leadlead11', activity: 'waiting' }), s({ id: 'workwork22', activity: 'working' })]))
+      .toContain('1 of them is waiting on a person')
+  })
+})
+
 describe('what is running', () => {
   test('counts them and names each one', () => {
     const out = plan([

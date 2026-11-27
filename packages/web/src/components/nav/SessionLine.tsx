@@ -31,7 +31,7 @@ import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { registerSessionRoleAlias, useSessionRole } from '../../lib/sessionRoles'
 import { reopeningLabel, useReopening } from '../../lib/reopeningStore'
 import { endingLabel, useEnding, useEndingTimedOut } from '../../lib/endingSessions'
-import { isWaitingState } from '../../lib/asideTabs'
+import { needsOwner } from '@agentistics/core'
 import type { RowVerb } from '../../lib/rowMenu'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { IconButton } from '../sessions/RepoSearchView'
@@ -100,8 +100,9 @@ export function SessionLine({
   const endingTimedOut = useEndingTimedOut(session.id)
   const ending = endingMark && !endingTimedOut
   const goTo = useContext(GoToSessionContext)
-  const waiting = isWaitingState(session.state)
-  const statusKind = lineStatusKind(session.state, session.activeSignal, fell)
+  const waiting = needsOwner(session)
+  const workers = session.waitingOnWorkers ?? 0
+  const statusKind = lineStatusKind(session.state, session.activeSignal, fell, workers)
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearLongPress = () => { if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null } }
   const canMenu = !!verbs && verbs.length > 0 && !!onOpenMenu
@@ -214,7 +215,7 @@ export function SessionLine({
       {/* The state, as the dot used to be: last of the row's own columns. Outside the open button —
           it is a tab stop of its own (the tooltip opens on focus), and a focusable inside a button is
           invalid HTML. */}
-      <LineStatusIcon kind={statusKind} text={lineStatusText(statusKind, time, pt)} {...(tap ? { tap } : {})} />
+      <LineStatusIcon kind={statusKind} text={lineStatusText(statusKind, time, pt, workers)} {...(tap ? { tap } : {})} />
       {onReopen && reopenVerb && (
         <IconButton
           label={!reopenVerb.enabled && reopenVerb.reason ? reopenVerb.reason : (pt ? 'Reabrir' : 'Reopen')}

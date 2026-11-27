@@ -44,6 +44,7 @@ import {
   type SessionOrder,
 } from '@agentistics/tui/control/sessions'
 import type { ControlSession, SessionState } from '@agentistics/tui/control'
+import { needsOwner } from '@agentistics/core'
 
 /**
  * The words the table wears. Supplied by the caller, already localized — the same split every pure
@@ -218,6 +219,14 @@ export function emptyReason(o: {
   if (o.shown > 0) return null
   if (o.unavailable) return 'unavailable'
   return o.fleet === 0 ? 'empty' : 'filtered'
+}
+
+/**
+ * The rows the closing "N waiting on you" sentence names: a question, or a finished turn with no busy
+ * worker (`needsOwner`). A leader waiting on its workers has nothing for the reader to answer.
+ */
+export function waitingOnReader<T extends Pick<ControlSession, 'state' | 'waitingOnWorkers'>>(rows: readonly T[]): T[] {
+  return rows.filter(needsOwner)
 }
 
 /** The whole table as lines — headings, the column header, the rows, and the air between sections. */

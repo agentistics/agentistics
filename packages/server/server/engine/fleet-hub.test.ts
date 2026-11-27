@@ -33,6 +33,15 @@ describe('the fleet hub — confirmed transitions only', () => {
     }])
   })
 
+  test('a turn waiting on its workers is no "waiting" transition; the last worker stopping is', () => {
+    const { hub, got } = listen()
+    hub.observe([row('working')], 0); hub.observe([row('working')], 1)
+    hub.observe([row('waiting', { waitingOnWorkers: 2 })], 2); hub.observe([row('waiting', { waitingOnWorkers: 1 })], 3)
+    expect(got).toEqual([])
+    hub.observe([row('waiting')], 4); hub.observe([row('waiting')], 5)
+    expect(got.map(t => `${t.from}→${t.to}`)).toEqual(['working→waiting'])
+  })
+
   test('a one-frame repaint writes nothing — working, (blip) waiting-approval, working', () => {
     const { hub, got } = listen()
     hub.observe([row('working')], 0); hub.observe([row('working')], 1)

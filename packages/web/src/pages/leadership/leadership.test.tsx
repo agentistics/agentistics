@@ -132,6 +132,21 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
   })
 })
 
+test('a leader waiting on its workers does not need you, and its pill is not the warning one', () => {
+  const fixtures = [
+    row('a', { state: 'waiting', stateLabel: 'esperando 1 worker', waitingOnWorkers: 1 }),
+    row('w', { parentConversationId: 'conversation-a', state: 'working' }),
+  ]
+  const roles = (r: ControlSession) => r.id === 'w' ? 'worker' as const : 'leader' as const
+  const html = atWidth(1440, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={fixtures} roleOf={roles} /></MemoryRouter>))
+  expect(html).toContain('1 líder · 0 precisam de você')
+  const alone = atWidth(1440, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={[row('a', { state: 'waiting', stateLabel: 'esperando você' })]} roleOf={roles} /></MemoryRouter>))
+  expect(alone).toContain('1 líder · 1 precisa de você')
+  // The pill tone differs between the two (warn only when it needs you).
+  const pill = (h: string) => h.slice(h.indexOf('esperando') - 400, h.indexOf('esperando'))
+  expect(pill(html)).not.toEqual(pill(alone))
+})
+
 for (const lang of ['pt', 'en'] as const) test(`leader titles, singular status and child scope in ${lang}`, () => {
   const fixtures = [row('a', { title: '[ LÍDER ] - [ LEADER ] - Motor', state: 'waiting' }), row('child', { parentSessionId: 'a', state: 'exited' })]
   const html = atWidth(390, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang={lang} rows={fixtures} roleOf={() => 'leader'} /></MemoryRouter>))

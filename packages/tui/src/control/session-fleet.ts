@@ -17,6 +17,7 @@
  */
 
 
+import { needsOwner } from '@agentistics/core'
 import type { ControlStrings } from './i18n'
 import { matchesQuery, matchScopes, scopeCounts, type ScopeCounts, type SearchScope } from './search-scope'
 import {
@@ -112,7 +113,7 @@ export function searchDepth(
 }
 
 export function attentionOf(list: readonly ControlSession[]): number {
-  return list.filter(s => s.state === 'waiting' || s.state === 'waiting-approval').length
+  return list.filter(needsOwner).length
 }
 
 // ---------------------------------------------------------------------------
@@ -861,7 +862,7 @@ export function sessionAge(s: ControlSession, now: number, ago: (seconds: number
 
 /** Does this row want a person? The one predicate the dot, the counter and the bell all read. */
 export function sessionNotify(s: ControlSession): boolean {
-  return s.state === 'waiting' || s.state === 'waiting-approval'
+  return needsOwner(s)
 }
 
 /** How much of a session id a row shows. Enough to be unambiguous in practice, and to type. */

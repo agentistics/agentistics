@@ -1,6 +1,6 @@
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { ACTIVE_STATES, type ControlSession } from '@agentistics/tui/control/session-fleet'
-import { stripRolePrefix } from '@agentistics/core'
+import { needsOwner, stripRolePrefix } from '@agentistics/core'
 import type { AppContext } from '../../lib/app-context'
 import { useFleet } from '../../lib/fleet'
 import { getSessionRole, useSessionRoles, useSessionRolesReady, type SessionRole } from '../../lib/sessionRoles'
@@ -36,7 +36,7 @@ export function LeadersContent({ lang, rows, roleOf, loading = false, unavailabl
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const leaders = applyLeadersOnly(rows, true, roleOf)
-  const needsYou = leaders.filter(row => row.state === 'waiting' || row.state === 'waiting-approval').length
+  const needsYou = leaders.filter(needsOwner).length
   // With no leader the empty sentence below says it; a "0 leaders · 0 need you" line above it would repeat it.
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="sessions" pageId="leaders" isMobile={isMobile}
@@ -48,7 +48,7 @@ export function LeadersContent({ lang, rows, roleOf, loading = false, unavailabl
         {!stale && leaders.length === 0 && <p>{pt ? 'Nenhuma sessão líder agora.' : 'No leader sessions right now.'}</p>}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 12 }}>
           {leaders.map(row => <RecordCard key={row.id} fieldLayout="stacked" title={stripRolePrefix(row.title)} subtitle={(HARNESS_LABELS as Record<string, string>)[row.harness] ?? 'N/A'}
-            badge={<Pill tone={row.state === 'waiting-approval' || row.state === 'waiting' ? 'warn' : row.state === 'working' ? 'ok' : 'neutral'}>{row.stateLabel}</Pill>}
+            badge={<Pill tone={needsOwner(row) ? 'warn' : row.state === 'working' ? 'ok' : 'neutral'}>{row.stateLabel}</Pill>}
             fields={[
               ...(row.task || row.taskId ? [{ label: pt ? 'Tarefa' : 'Task', value: <span style={{ overflowWrap: 'anywhere' }}>{row.task ?? row.taskId}</span> }] : []),
               { label: pt ? 'Em execução' : 'Running for', value: row.startedAt === undefined ? (pt ? 'Horário indisponível' : 'Time unavailable') : fmtSpan(Math.max(0, now - row.startedAt), lang) },

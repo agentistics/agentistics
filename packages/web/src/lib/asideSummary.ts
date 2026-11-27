@@ -6,34 +6,35 @@
  * summary's own filter), so pressing a part never changes the numbers the other parts show — a
  * summary that reshuffled itself under the finger would be unreadable.
  */
+import { needsOwner } from '@agentistics/core'
 import { sessionRunning } from '@agentistics/tui/control/session-fleet'
 
 export type SummaryPart = 'active' | 'working' | 'needs'
 
 export interface SummaryCounts { active: number; working: number; needs: number }
 
-/** `waiting` and `waiting-approval` are the two states that want a person. */
-const NEEDS = new Set<string>(['waiting', 'waiting-approval'])
+type Row = { state: string; waitingOnWorkers?: number }
 
-export function summaryMatches(state: string, part: SummaryPart): boolean {
-  if (part === 'active') return sessionRunning({ state })
-  if (part === 'working') return state === 'working'
-  return NEEDS.has(state)
+/** "needs you" is `needsOwner`: a turn waiting on its workers is active, and asks nothing. */
+export function summaryMatches(row: Row, part: SummaryPart): boolean {
+  if (part === 'active') return sessionRunning(row)
+  if (part === 'working') return row.state === 'working'
+  return needsOwner(row)
 }
 
-export function summaryCounts(rows: readonly { state: string }[]): SummaryCounts {
+export function summaryCounts(rows: readonly Row[]): SummaryCounts {
   const c: SummaryCounts = { active: 0, working: 0, needs: 0 }
   for (const r of rows) {
-    if (summaryMatches(r.state, 'active')) c.active++
-    if (summaryMatches(r.state, 'working')) c.working++
-    if (summaryMatches(r.state, 'needs')) c.needs++
+    if (summaryMatches(r, 'active')) c.active++
+    if (summaryMatches(r, 'working')) c.working++
+    if (summaryMatches(r, 'needs')) c.needs++
   }
   return c
 }
 
 /** `null` = no part selected: the list is untouched. */
-export function applySummaryFilter<T extends { state: string }>(rows: readonly T[], part: SummaryPart | null): T[] {
-  return part === null ? [...rows] : rows.filter(r => summaryMatches(r.state, part))
+export function applySummaryFilter<T extends Row>(rows: readonly T[], part: SummaryPart | null): T[] {
+  return part === null ? [...rows] : rows.filter(r => summaryMatches(r, part))
 }
 
 /** Pressing the selected part again clears it. */

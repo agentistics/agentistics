@@ -11,6 +11,7 @@
  * control center still imports them from the one module it already names.
  */
 
+import { ownerState } from '@agentistics/core'
 import type { ControlSession, SessionState } from './types'
 
 /**
@@ -38,8 +39,9 @@ const RANK: Record<SessionState, number> = {
  * "what is most urgent", after the cockpit's and the browser's. Every existing caller passes a
  * `ControlSession` and is unaffected.
  */
-export function sessionRank(s: Pick<ControlSession, 'state'>): number {
-  return RANK[s.state]
+export function sessionRank(s: Pick<ControlSession, 'state' | 'waitingOnWorkers'>): number {
+  // A turn waiting on its own workers is not blocked on the reader: it ranks with `idle`.
+  return RANK[ownerState(s)]
 }
 
 /**

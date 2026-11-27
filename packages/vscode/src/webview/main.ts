@@ -618,7 +618,7 @@ function stateDot(row: FleetRow): HTMLElement {
   // The dot costs nothing on a fleet where nothing is waiting, and never carries the message alone:
   // the state word is beside it.
   const dot = el('span', 'dot')
-  dot.textContent = row.state === 'waiting' || row.state === 'waiting-approval' ? '●' : '○'
+  dot.textContent = row.state === 'waiting-approval' || (row.state === 'waiting' && !row.waitingOnWorkers) ? '●' : '○'
   return dot
 }
 

@@ -5,6 +5,7 @@
  * the session's own page (the conversation strip says it there) and not while the window is minimized (the
  * minimized chip already is the handle).
  */
+import { isWaitingOnWorkers, needsOwner } from '@agentistics/core'
 import { useLocation } from 'react-router-dom'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -18,17 +19,17 @@ const STATE_WORD: Record<Lang, Partial<Record<FleetRow['state'], string>>> = {
 }
 
 /** Pure: the chip's text and dot colour for a session's state. */
-export function followChipView(row: Pick<FleetRow, 'title' | 'state'> | undefined, fallbackTitle: string | undefined, lang: Lang): { text: string; dot: string } {
+export function followChipView(row: Pick<FleetRow, 'title' | 'state' | 'waitingOnWorkers'> | undefined, fallbackTitle: string | undefined, lang: Lang): { text: string; dot: string } {
   const title = row?.title || fallbackTitle || (lang === 'pt' ? 'Navegador' : 'Browser')
-  const word = row ? STATE_WORD[lang][row.state] : undefined
+  const word = row ? (isWaitingOnWorkers(row) ? (lang === 'pt' ? 'esperando workers' : 'waiting on workers') : STATE_WORD[lang][row.state]) : undefined
   const dot = !row ? 'var(--text-tertiary)'
     : row.state === 'working' ? '#22c55e'
-      : row.state === 'waiting' || row.state === 'waiting-approval' ? 'var(--anthropic-orange)'
+      : needsOwner(row) ? 'var(--anthropic-orange)'
         : 'var(--text-tertiary)'
   return { text: word ? `${title} · ${word}` : title, dot }
 }
 
-export function BrowserFollowChip({ lang, enabled = true, rows }: { lang: Lang; enabled?: boolean; /** Injected in tests: the fleet rows otherwise come from `useFleet`. */ rows?: readonly Pick<FleetRow, 'id' | 'title' | 'state' | 'conversationId'>[] }) {
+export function BrowserFollowChip({ lang, enabled = true, rows }: { lang: Lang; enabled?: boolean; /** Injected in tests: the fleet rows otherwise come from `useFleet`. */ rows?: readonly Pick<FleetRow, 'id' | 'title' | 'state' | 'conversationId' | 'waitingOnWorkers'>[] }) {
   const state = useBrowserWindows()
   const { pathname } = useLocation()
   const mobile = useIsMobile()

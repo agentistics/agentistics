@@ -6,6 +6,7 @@ import { sessionTime } from '../lib/sessionTime'
 import { reopeningLabel } from '../lib/reopeningStore'
 import { formatProjectName, repoShortName, sessionLabel, sessionTokenTotal } from '@agentistics/core'
 import type { SessionActivity } from '../lib/sessionNotifications'
+import { ownerActivity, waitsOnPerson } from '../lib/sessionWaiting'
 import type { FleetActionId, FleetRow, FleetVerb } from '../lib/fleet'
 import { primaryAction, isWatchable, type PrimaryAction } from '../lib/sessionActions'
 import { bandRepeats, type CardFact, type SessionGrouping } from '../lib/sessionCard'
@@ -440,13 +441,15 @@ function getSessionBucketKey(
   groupBy: SessionGrouping,
   pinnedIds?: Set<string>,
   activities?: Record<string, SessionActivity>,
+  fleet?: Map<string, FleetRow>,
 ): { key: string; label: string; icon: React.ReactNode } {
   const isPinned = pinnedIds?.has(s.session_id)
   switch (groupBy) {
     case 'status': {
       // The state comes from the live poll, never from the session record — a stored session
       // carries no state, and grouping every one of them under "working" would be an invention.
-      const st = activities?.[s.session_id]
+      // A leader waiting on its workers is not "waiting for a reply" (`ownerActivity`).
+      const st = ownerActivity(activities?.[s.session_id], fleet?.get(s.session_id))
       if (st) {
         const info = STATUS_BUCKETS[st]
         return { key: st, label: info.label, icon: <Radio size={13} style={{ color: info.color }} /> }
@@ -524,8 +527,8 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
     const isLive = pinnedIds?.has(s.session_id)
     if (statusShortcut === 'active') return Boolean(isLive)
     if (statusShortcut === 'waiting') {
-      const st = activities?.[s.session_id]
-      return Boolean(isLive) && (st === 'waiting' || st === 'waiting-approval')
+      // A leader waiting on its workers is not waiting on the person (`waitingOnWorkers`, from the fleet row).
+      return Boolean(isLive) && waitsOnPerson(activities?.[s.session_id], fleet?.get(s.session_id))
     }
     if (statusShortcut === 'closed') return !isLive
     return true
@@ -572,8 +575,7 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
         const isLive = pinnedIds?.has(s.session_id)
         if (statusShortcut === 'active') return isLive
         if (statusShortcut === 'waiting') {
-          const st = activities?.[s.session_id]
-          return isLive && (st === 'waiting' || st === 'waiting-approval')
+          return isLive && waitsOnPerson(activities?.[s.session_id], fleet?.get(s.session_id))
         }
         if (statusShortcut === 'closed') return !isLive
         return true
@@ -626,7 +628,7 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
     })
 
     return list
-  }, [sessions, search, statusShortcut, sortKey, sortDir, pinnedIds, pinnedTopSet])
+  }, [sessions, search, statusShortcut, sortKey, sortDir, pinnedIds, pinnedTopSet, activities, fleet])
 
   // Grouped list
   const groups = useMemo(() => {
@@ -634,7 +636,7 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
 
     const map = new Map<string, { key: string; label: string; icon: React.ReactNode; sessions: SessionMeta[] }>()
     for (const s of filteredAndSorted) {
-      const bucket = getSessionBucketKey(s, groupBy, pinnedIds, activities)
+      const bucket = getSessionBucketKey(s, groupBy, pinnedIds, activities, fleet)
       const existing = map.get(bucket.key)
       if (existing) {
         existing.sessions.push(s)
@@ -643,7 +645,7 @@ export function RecentSessions({ sessions, lang, onSelect, pinnedIds, activities
       }
     }
     return Array.from(map.values())
-  }, [filteredAndSorted, groupBy, pinnedIds, activities])
+  }, [filteredAndSorted, groupBy, pinnedIds, activities, fleet])
 
   // Reset page on filter changes
   const totalItems = filteredAndSorted.length

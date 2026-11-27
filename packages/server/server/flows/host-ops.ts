@@ -341,10 +341,12 @@ export const resetStoppedStreaks = () => streaks.clear()
  * The "agent stopped" decision for one session over a fleet snapshot, with the streak bookkeeping (N6): a refusal ends the
  * streak, and a streak only grows from a poll that is newer than the last yet within STREAK_MAX_GAP_MS of it.
  */
-export function judgeStopped(id: string, snapshot: { polledAtMs: number; sessions: ReadonlyArray<{ id: string; status?: string; activity?: string; background?: boolean }> }): Refusal | { ok: true; sessionId: string; polls: number } {
+export function judgeStopped(id: string, snapshot: { polledAtMs: number; sessions: ReadonlyArray<{ id: string; status?: string; activity?: string; background?: boolean; waitingOnWorkers?: number }> }): Refusal | { ok: true; sessionId: string; polls: number } {
   const row = snapshot.sessions.find(s => s.id === id)
   if (!row) { streaks.delete(id); return refuse('session was not found', ['existing session']) }
-  if (row.status !== 'running' || row.activity !== 'waiting' || row.background === true) {
+  // A leader whose turn ended while its workers still run (`waitingOnWorkers`, the server's one reading) has work in
+  // flight: it is not stopped, and a flow must not close or clean it up.
+  if (row.status !== 'running' || row.activity !== 'waiting' || row.background === true || (row.waitingOnWorkers ?? 0) > 0) {
     streaks.delete(id)
     return refuse('session is not confirmed stopped', ['waiting activity on two consecutive polls', 'no background work'])
   }
