@@ -44,13 +44,14 @@ export function maskReason(e: WorktreeEntry): string | null {
  * without git inside, the common git dir is not mounted at all, so nothing of it (FETCH_HEAD, modules, other
  * worktrees, the real config) can be read.
  */
-export function maskMounts(root: string, entries: readonly WorktreeEntry[], opts: { gitDirInTree?: boolean } = {}): { mounts: MountSpec[]; masked: string[] } {
+export function maskMounts(root: string, entries: readonly WorktreeEntry[], opts: { gitDirInTree?: boolean; foreignDirs?: readonly string[] } = {}): { mounts: MountSpec[]; masked: string[] } {
   const mounts: MountSpec[] = []
   const masked: string[] = []
   const dirs = new Set<string>()
   const abs = (p: string) => `${root.replace(/\/+$/, '')}/${p}`
   for (const e of entries) {
     if (inNodeModules(e.path)) continue
+    if (e.path.endsWith('/')) continue // a nested repository directory: handled through `foreignDirs`
     const segs = e.path.split('/')
     const dirAt = segs.findIndex((s, i) => i < segs.length - 1 && DIR_RULES.has(s))
     if (dirAt >= 0) { dirs.add(segs.slice(0, dirAt + 1).join('/')); continue }
@@ -58,6 +59,15 @@ export function maskMounts(root: string, entries: readonly WorktreeEntry[], opts
     if (maskReason(e)) { mounts.push({ type: 'bind', source: '/dev/null', target: abs(e.path), readonly: true }); masked.push(e.path) }
   }
   if (opts.gitDirInTree) dirs.add('.git')
-  for (const d of [...dirs].sort()) { mounts.push({ type: 'tmpfs', target: abs(d), readonly: true }); masked.push(`${d}/`) }
+  // Submodules, nested repositories and nested worktrees (`.claude/worktrees/x`, `.worktrees/x`) are not walked by
+  // `git ls-files --others` (it reports the directory itself), so their `.env` and `.git/config` cannot be masked
+  // one by one: the WHOLE directory is hidden behind an empty read-only tmpfs (SPEC §5.2: not seen from inside).
+  for (const f of opts.foreignDirs ?? []) {
+    const d = f.replace(/\/+$/, '')
+    if (d && d !== '.' && !d.split('/').includes('..') && !inNodeModules(d)) dirs.add(d)
+  }
+  // A mount point inside another masked directory does not exist there: the outer mask already hides it.
+  const outer = (d: string) => [...dirs].some(o => o !== d && d.startsWith(`${o}/`))
+  for (const d of [...dirs].filter(d => !outer(d)).sort()) { mounts.push({ type: 'tmpfs', target: abs(d), readonly: true }); masked.push(`${d}/`) }
   return { mounts, masked }
 }

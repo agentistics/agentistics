@@ -2509,5 +2509,11 @@
   ],
   "server/server/sessions/native-notes.ts": [
     "raw-writer-helper"
+  ],
+  "server/server/docker-env/docker-run.ts": [
+    "raw-writer-helper"
+  ],
+  "server/server/docker-env/env-install.ts": [
+    "raw-writer-helper"
   ]
 }

@@ -21,6 +21,7 @@ export interface ContainerEnvInput {
 const CREDENTIAL_NAME = /TOKEN|SECRET|KEY|PASS|AUTH|CRED|COOKIE|SESSION|PRIVATE/i
 const TERMS = new Set(['xterm', 'xterm-256color', 'screen', 'screen-256color', 'tmux', 'tmux-256color', 'dumb', 'vt100', 'linux'])
 const SAFE_NAME = /^[A-Z_][A-Z0-9_]*$/
+const OWN_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 export function containerEnv(i: ContainerEnvInput): Record<string, string> {
   const h = i.host
@@ -47,8 +48,10 @@ export function containerEnv(i: ContainerEnvInput): Record<string, string> {
     if (h.LINES && /^\d{1,4}$/.test(h.LINES)) env.LINES = h.LINES
   }
   for (const k of ['NO_COLOR', 'FORCE_COLOR'] as const) if (h[k] && /^[0-3]$/.test(h[k]!)) env[k] = h[k]!
-  for (const [k, v] of Object.entries({ ...(i.profile ?? {}), ...(i.extra ?? {}) })) {
-    if (!SAFE_NAME.test(k) || CREDENTIAL_NAME.test(k) || k in env || k === 'PATH' || /^(AGENTISTICS|AGENTOP)_/.test(k)) continue
+  // `profile` comes from the repo (untrusted): upper-case names only. `extra` is agentop's own fixed set (cache dirs of
+  // the install phases) and may be lower-case — `npm_config_cache` was silently dropped by the upper-case rule.
+  for (const [k, v, own] of [...Object.entries(i.profile ?? {}).map(([k, v]) => [k, v, false] as const), ...Object.entries(i.extra ?? {}).map(([k, v]) => [k, v, true] as const)]) {
+    if (!(own ? OWN_NAME : SAFE_NAME).test(k) || CREDENTIAL_NAME.test(k) || k in env || k === 'PATH' || /^(AGENTISTICS|AGENTOP)_/.test(k)) continue
     if (/[\r\n\0]/.test(v)) continue
     env[k] = v
   }

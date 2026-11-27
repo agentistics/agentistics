@@ -127,8 +127,8 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
     // Opt-in like flows: Docker as a worker's environment is suggested, never started for anyone who did not ask.
     isOn: raw => raw === '1',
     description: {
-      en: 'Docker as the worker environment: detects Docker, suggests it (or its installation) and records the choice. Nothing runs in a container yet.',
-      pt: 'Docker como ambiente do worker: detecta o Docker, sugere usá-lo (ou instalá-lo) e guarda a escolha. Nada roda em contêiner ainda.',
+      en: 'Docker as the worker environment: detects Docker, suggests it (or its installation) and records the choice. Once you choose Docker, `agentop run --rm -- <command>` runs each command in its own disposable container (no network, only the project folder, without its credential files); anything it cannot isolate safely falls back to the isolated namespace.',
+      pt: 'Docker como ambiente do worker: detecta o Docker, sugere usá-lo (ou instalá-lo) e guarda a escolha. Depois que você escolhe Docker, `agentop run --rm -- <comando>` roda cada comando no seu próprio contêiner descartável (sem rede, só a pasta do projeto, sem os arquivos de credencial dela); o que não puder ser isolado com segurança cai no namespace isolado.',
     },
   },
 ]

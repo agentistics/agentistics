@@ -8,7 +8,8 @@
  * (bind), `scratch`, `nm` and `/saida` all survive — `/tmp` included.
  *
  * `nm` is writable ONLY in the install containers; everywhere else it is mounted read-only (and `inspect`
- * re-checks it). The download container sees the worktree read-only and no `scratch`: no repo code runs there.
+ * re-checks it). The download container never sees the worktree (r4 #2): only a host-generated read-only staging
+ * (`staging.ts`) and no `scratch` — no repo code or repo config exists there.
  */
 /** The identity marker at a volume's ROOT (commands only mount sub-paths, so repo code never reaches it). */
 export const VOLUME_MARKER = '/v/.agentistics-volume'
@@ -37,6 +38,8 @@ export interface PlanInput {
   saidaDir: string
   /** install-download: the host dir holding `egress.sock`. serve: the host dir holding `ingress.sock`. */
   sockDir?: string
+  /** install-download only: the host-generated staging directory (see `staging.ts`). */
+  stagingDir?: string
   ttlSec: number
   argv: string[]
 }
@@ -54,9 +57,16 @@ export function nmSubdirs(nm: readonly NmSlot[]): string[] {
 export function containerPlan(i: PlanInput): ContainerPlan {
   const nmWritable = i.kind === 'install-download' || i.kind === 'install-scripts'
   const mounts: MountSpec[] = []
-  const worktreeRo = i.kind === 'install-download'
-  mounts.push({ type: 'bind', source: i.root, target: i.root, readonly: worktreeRo })
-  mounts.push(...i.masks)
+  // r4 #2: the download container NEVER mounts the worktree. It gets the host-generated, read-only staging at the same
+  // path (package.json, lockfile, workspace file, one generated .npmrc): no `.pnpmfile.cjs`, repo config, plugin or
+  // patch exists there for a package manager to load, so no repo code can run with the registry grant or the rw cache.
+  if (i.kind === 'install-download') {
+    if (!i.stagingDir) throw new Error('install-download needs a host-generated staging directory (never the worktree)')
+    mounts.push({ type: 'bind', source: i.stagingDir, target: i.root, readonly: true })
+  } else {
+    mounts.push({ type: 'bind', source: i.root, target: i.root, readonly: false })
+    mounts.push(...i.masks)
+  }
   if (i.kind === 'install-download') {
     mounts.push({ type: 'tmpfs', target: '/home/agent', readonly: false })
     mounts.push({ type: 'tmpfs', target: '/tmp', readonly: false })
@@ -78,7 +88,7 @@ export function containerPlan(i: PlanInput): ContainerPlan {
   if (i.sockDir) mounts.push({ type: 'bind', source: i.sockDir, target: '/run/agentistics', readonly: false })
   return {
     kind: i.kind, name: i.name, image: i.image, user: { uid: i.uid, gid: i.gid }, memoryBytes: i.memoryBytes,
-    workdir: i.cwd, envFile: i.envFile, labels: i.labels, mounts, ttlSec: i.ttlSec, argv: i.argv,
+    workdir: i.kind === 'install-download' ? i.root : i.cwd, envFile: i.envFile, labels: i.labels, mounts, ttlSec: i.ttlSec, argv: i.argv,
   }
 }
 

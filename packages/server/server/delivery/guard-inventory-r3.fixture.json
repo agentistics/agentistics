@@ -143,7 +143,8 @@
       "6590df11df73b81bca24dc6532ffef84038a38f133dbfb40fc475cb79f6adb65",
       "7c810b967bab6fc79166858d78b156f25a673395cc8297bf0dc07db624f5fe28",
       "95b08669275a63248df6ebd8ec33c0c17271108d7a5959c0820e2723ba9343f2",
-      "a2b943d1656e24dc5ad5b3529d99ad2bf0e5dd73619828a40381819c8169b091"
+      "a2b943d1656e24dc5ad5b3529d99ad2bf0e5dd73619828a40381819c8169b091",
+      "0bbdbc195b716e23651f6d97c802c9d8d2b182fd374f98f71b2294c1ba4d3132"
     ],
     "server/server/cli-start.ts": [
       "15b623eb03a936d9858b6be0ba0ebfbda62151ed34c158a62f1d5dfc4ab23715",
@@ -382,6 +383,50 @@
       "f283d91759c98d3a986f66f5e9e3f1aed0729002fe3a7d6d53dea21b34047a10",
       "4f61fa2f6992dc273af88bcdf42f99125cf5450820e7e6548278f361e980fb01",
       "b2b339d9861e71c5c800c3321407babc8d73ad10fdf3146f27c09da60d7a4930"
+    ],
+    "server/server/docker-env/docker-cli.ts": [
+      "f977c42f73e33d2cca1d916dd3fe070b387cce4583651f8f115af8d838859bd2",
+      "bb3cd1f91b9371218fdd28216399c3cec8125902c23e60c6232eaa00fd2ba2fe"
+    ],
+    "server/server/docker-env/docker-run.ts": [
+      "365774b78dcc01d346caf9f5137d6354538d29695442f618b4dddda05d416aa6",
+      "7bdf4ddc1c41a8189d3fcfad70a4f76d0081dfa5890087ea9f7dffd69e5a9372",
+      "d895eef26f2f052843340adb7d7c7285f858a72dc7ce1748f165e5e69960eb51",
+      "75232e4b7cab15fb6eab355e5156580cb8c7ddaabc1f8377063f8296831b2f69",
+      "f45a0bebaac7e19b10c6d610ccf52aeec63e8a7fbdb20f2a2bca3d49fe91c02e",
+      "008d6af6dcc88c4d657d778cc34b80a6e4c4c86b61d2b2f4106fd78cdd1e5cf0",
+      "c93eee80ace5c9bf46c5ce9e5d9b3daac3ffc2bdf79c0a174d7cd42819efeb42",
+      "5ce214fec32d3c7b1e1c07e2e0c5f3f97f26121c4ee96821110130817320b42b",
+      "fcdce8d3ff916f39672eb7aded6952a42257955748b0f1a9a16aef1cd90d3222",
+      "b59618690604bb9da5e0e56602a50c8b8f04c669bb76a01ac18c897238f298dc",
+      "b59618690604bb9da5e0e56602a50c8b8f04c669bb76a01ac18c897238f298dc"
+    ],
+    "server/server/docker-env/egress-proxy.ts": [
+      "95ef0d036f9589a27b808be94b4339ef9e0e536e927ee3a503aa11e0e20387a4",
+      "7a3c2c21e6ea9c35b2649303a132fa729652e1fd624416815bc0bb4ce9311c30"
+    ],
+    "server/server/docker-env/env-install.ts": [
+      "365823512f2053e8ff33cc208669f718dbeb066a97f56f8c9203a7e365dd3ff1",
+      "bcdaaff3e46cbb436b9ab684f7cc16f9fe6cec4091a3d75ae79822a2e2b96af4",
+      "e7742a26b7faa2e469ea20667394c347b787b04f78cb14921633640252034a48",
+      "e7742a26b7faa2e469ea20667394c347b787b04f78cb14921633640252034a48",
+      "b43e5a6b2276001c49f2ca4ff67f873d1f691acb046afd01cfcbe2c550e62cd7"
+    ],
+    "server/server/docker-env/ledger.ts": [
+      "789eca5762fe8bc52a682bc052750098f830351e1307e69105f1fd91779f3c18",
+      "05cec327d64fe2c1fca9183061b99cc1e3f8238c682eec136225560cae8c8379",
+      "87ba98fc4ccad17316e0ca88747ac52ebfef8a7495bbd5efcc011022c6a51259",
+      "565c8a119e44e20e9e086544b840bcd353c43e88d7aa254c73f71a3ba8612daf",
+      "34aab8c90cb50f7bffb62ca114843072341a20974c7943a166da0c63f04df4d3",
+      "a06c513cfac2af3df2a084dfdc53ff738ef7f9023ad3d0b9b6972f106e578e1f",
+      "a06c513cfac2af3df2a084dfdc53ff738ef7f9023ad3d0b9b6972f106e578e1f",
+      "b3856537b3c499492ae31bb179215cd9b7a44d028042683d48e0cc7abb6ce4d1",
+      "81ee88819a8d71aa802b8eaa069e3ba7bf652ba4333e2c4eb83d62bc4fea97dd",
+      "11a4777cdb37942f15fc55218a7cd3e7d7c75be8fd4c4fc4ffb52c9aff47afc4"
+    ],
+    "server/server/docker-env/staging.ts": [
+      "185c6b8fa231d71a1fa639fd6124175f37340f71576e26820194909e8729b0ef",
+      "a4197a80bc422d2a55e913b90f7060ac9b8e06604b3398193073e716523cc958"
     ]
   },
   "reach": {
@@ -1256,6 +1301,12 @@
     "web/src/whatsNew/releases.ts": [
       "text:Flows (experimental): work folders of sessions that are already published and have no changes are removed on their own; files such as .env or backups keep the folder, and an .agentistics-keep file protects any folder.",
       "text:Fluxos (experimental): pastas de trabalho de sessões já publicadas e sem mudanças são apagadas sozinhas; arquivos como .env ou backups fazem a pasta ficar, e um arquivo .agentistics-keep protege qualquer pasta."
+    ],
+    "server/server/docker-env/env-profile.ts": [
+      "text:.agentistics/env.yml"
+    ],
+    "server/server/docker-env/plans.ts": [
+      "text:/v/.agentistics-volume"
     ]
   }
 }

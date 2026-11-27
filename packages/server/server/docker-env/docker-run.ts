@@ -11,7 +11,7 @@
  * included — it is in the container's cgroup and pid namespace), and another command is another container. A dead
  * launcher is covered by the TTL that `exec-wrap` applies INSIDE.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -48,6 +48,8 @@ export interface DockerRunInput {
   /** `cmd` (default) or one of the install phases. */
   kind?: 'cmd' | 'install-download' | 'install-scripts'
   sockDir?: string
+  /** install-download: the host-generated staging directory mounted (read-only) in place of the worktree. */
+  stagingDir?: string
   /** For install: the target nm generation and volume (created by the caller). */
   nmOverride?: string
   /** Lower the admitted memory (live proofs force an OOM with a small cap). Never raises it. */
@@ -68,24 +70,45 @@ const prefixOf = (env: Record<string, string | undefined>) => {
 }
 const hex = (n: number) => randomBytes(n).toString('hex')
 
+/** Any non-success of a git call (exit code, timeout, killed by the buffer limit) is `null` — never a partial stdout. */
 function hostGit(cwd: string, args: string[]): string | null {
   const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 15_000, maxBuffer: 32 * 1024 * 1024 })
-  return r.status === 0 ? r.stdout : null
+  return r.status === 0 && !r.error && !r.signal ? r.stdout : null
 }
 
-/** The worktree root (bind-mounted at the same absolute path) and whether a `.git` DIRECTORY sits inside it. */
-export function worktreeOf(cwd: string): { root: string; gitDirInTree: boolean } {
-  const top = hostGit(cwd, ['rev-parse', '--show-toplevel'])?.trim() || cwd
+/**
+ * The worktree root (bind-mounted at the same absolute path) and whether a `.git` DIRECTORY sits inside it.
+ * `null` when `cwd` is not inside a git worktree: the root would then be the cwd itself (or `~`), mounted with no
+ * masks at all — never done; the caller stays in the namespace backend (SPEC §5.2: HOME and `~/.ssh` never enter).
+ */
+export function worktreeOf(cwd: string): { root: string; gitDirInTree: boolean } | null {
+  const top = hostGit(cwd, ['rev-parse', '--show-toplevel'])?.trim()
+  if (!top || !top.startsWith('/')) return null
   let gitDirInTree = false
   try { gitDirInTree = statSync(join(top, '.git')).isDirectory() } catch {}
   return { root: top, gitDirInTree }
 }
 
-/** Untracked + ignored entries outside node_modules, with the head of small files (for the content rules). */
-export function worktreeEntries(root: string): WorktreeEntry[] {
-  const out = hostGit(root, ['ls-files', '--others', '-z', '--exclude=node_modules', '--', '.']) ?? ''
+/** The listing the masks depend on could not be produced: the command is refused, never run with an empty mask list. */
+export class MaskListingError extends Error {}
+
+/**
+ * Untracked + ignored entries outside node_modules, with the head of small files (for the content rules), and the
+ * directories `git ls-files --others` does not walk: nested repositories / nested worktrees (reported as `dir/`) and
+ * submodules (gitlinks, mode 160000). A failed listing THROWS (fail closed).
+ */
+export function worktreeEntries(root: string): { entries: WorktreeEntry[]; foreignDirs: string[] } {
+  const out = hostGit(root, ['ls-files', '--others', '-z', '--exclude=node_modules', '--', '.'])
+  const staged = hostGit(root, ['ls-files', '--stage', '-z'])
+  if (out === null || staged === null) throw new MaskListingError('git ls-files failed (exit, timeout or output limit): the credential masks cannot be computed')
+  const foreignDirs = new Set<string>()
+  for (const rec of staged.split('\0').filter(Boolean)) {
+    const m = /^160000 [0-9a-f]+ \d\t(.+)$/.exec(rec)
+    if (m && existsSync(join(root, m[1]!))) foreignDirs.add(m[1]!)
+  }
   const entries: WorktreeEntry[] = []
   for (const path of out.split('\0').filter(Boolean)) {
+    if (path.endsWith('/')) { foreignDirs.add(path.replace(/\/+$/, '')); continue }
     if (path.split('/').includes('node_modules')) continue
     let head: string | undefined
     try {
@@ -94,7 +117,42 @@ export function worktreeEntries(root: string): WorktreeEntry[] {
     } catch {}
     entries.push({ path, head })
   }
-  return entries
+  return { entries, foreignDirs: [...foreignDirs].sort() }
+}
+
+export const nodeModulesPath = (root: string, s: NmSlot): string => join(root, s.rel, 'node_modules')
+
+/**
+ * r4 cut #1: every `node_modules` that becomes a mount point must be ABSENT or EMPTY on the host (lstat, symlinks
+ * are never followed). Anything else — files, a symlink, a directory with entries — would be hidden by the volume
+ * and later looked at by a cleanup as "only a mount point": `nm_host_nao_vazio`, the worktree stays in the
+ * namespace backend. Nothing is created unless every point passed; what is created is returned for the ledger.
+ */
+export function admitMountPoints(root: string, slots: readonly NmSlot[]): { ok: true; created: string[] } | { ok: false; code: 'nm_host_nao_vazio'; path: string } {
+  const toCreate: string[] = []
+  for (const s of slots) {
+    const p = nodeModulesPath(root, s)
+    let st
+    try { st = lstatSync(p) } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') { toCreate.push(p); continue }
+      return { ok: false, code: 'nm_host_nao_vazio', path: p }
+    }
+    if (!st.isDirectory() || st.isSymbolicLink() || readdirSync(p).length > 0) return { ok: false, code: 'nm_host_nao_vazio', path: p }
+  }
+  const created: string[] = []
+  for (const p of toCreate) { mkdirSync(p); created.push(p) }
+  return { ok: true, created }
+}
+
+/** Admission of the worktree for the docker backend; records the mount points agentop created (ledger `mountpoints`). */
+export function admitWorktree(dataDir: string, sid: string, perRun: boolean, root: string, slots: readonly NmSlot[]): string | null {
+  const a = admitMountPoints(root, slots)
+  if (!a.ok) return `nm_host_nao_vazio: ${a.path} has content on the host and a volume would hide it. This worktree stays in the isolated namespace.`
+  if (a.created.length) withLedger(dataDir, l => {
+    const s = l.sessions[sid] ??= emptySession(perRun, new Date().toISOString())
+    s.mountpoints = [...new Set([...(s.mountpoints ?? []), ...a.created])]
+  })
+  return null
 }
 
 /** The `node_modules` slots: root + each workspace directory that exists (globs ending in `/*` expanded). */
@@ -324,7 +382,9 @@ export function makeCtx(dataDir: string, env: Record<string, string | undefined>
 /** The whole §3.3 path. */
 export async function runInDocker(i: DockerRunInput): Promise<DockerRunOutcome> {
   const log = i.log ?? ((s: string) => console.error(s))
-  const { root, gitDirInTree } = worktreeOf(i.cwd)
+  const wt = worktreeOf(i.cwd)
+  if (!wt) return { ran: false, fallback: true, reason: 'this folder is not inside a git worktree: Docker would have to mount it with no credential masks. This run uses the isolated namespace.' }
+  const { root, gitDirInTree } = wt
   const profileText = (() => { try { return readFileSync(join(root, PROFILE_REL), 'utf8') } catch { return null } })()
   const prof = imageForProfile(profileText)
   if (!prof.ok) return { ran: false, fallback: true, reason: `${prof.reason}. This run uses the isolated namespace.` }
@@ -338,6 +398,8 @@ export async function runInDocker(i: DockerRunInput): Promise<DockerRunOutcome> 
     const imgErr = ensureImage(c)
     if (imgErr) return { ran: false, fallback: true, reason: `${imgErr}. This run uses the isolated namespace.` }
     const slots = workspaceSlots(root)
+    const nmRefusal = admitWorktree(i.dataDir, who.sid, who.perRun, root, slots)
+    if (nmRefusal) return { ran: false, fallback: true, reason: nmRefusal }
     const vols = ensureVolumes(c, who.sid, who.perRun, slots)
     if (!vols.ok) return { ran: false, fallback: false, code: 4, reason: `${vols.code}: ${vols.reason}` }
     const volumes = i.nmOverride ? { ...vols.volumes, nm: i.nmOverride } : vols.volumes
@@ -368,24 +430,36 @@ function launcherAlive(e: { launcherPid: number; launcherStart: number | null })
 
 export async function runCommand(c: Ctx, i: DockerRunInput, who: { sid: string; perRun: boolean }, root: string, gitDirInTree: boolean, slots: readonly NmSlot[], volumes: SessionVolumes, memoryBytes: number, profileEnv: Record<string, string>): Promise<DockerRunOutcome> {
   const kind = i.kind ?? 'cmd'
+  // The download container never sees the worktree (r4 #2): only the host-generated staging, so no repo file is read there.
+  const download = kind === 'install-download'
+  if (download && !i.stagingDir) return { ran: false, fallback: false, code: 4, reason: 'install_exige_arquivo_do_repo: the download container needs a host-generated staging directory, never the worktree' }
+  let masks: { mounts: MountSpec[]; masked: string[] } = { mounts: [], masked: [] }
+  if (!download) {
+    // r4 #1: the mount points must be absent or EMPTY on the host (nothing is hidden), and r4 fail-closed masks (§5.2).
+    const nmRefusal = admitWorktree(c.dataDir, who.sid, who.perRun, root, slots)
+    if (nmRefusal) return { ran: false, fallback: true, reason: nmRefusal }
+    try {
+      const w = worktreeEntries(root)
+      masks = maskMounts(root, w.entries, { gitDirInTree, foreignDirs: w.foreignDirs })
+    } catch (e) {
+      if (e instanceof MaskListingError) return { ran: false, fallback: false, code: 4, reason: `refused: ${e.message}` }
+      throw e
+    }
+  }
   const execId = hex(8)
   const execDir = join(dockerDir(c.dataDir), 'run', who.sid, execId)
   mkdirSync(execDir, { recursive: true, mode: 0o700 })
   const saidaDir = join(dockerDir(c.dataDir), 'saida', who.sid)
   mkdirSync(saidaDir, { recursive: true, mode: 0o700 })
-  // The node_modules mount points exist on the host as EMPTY directories (a read-only worktree bind — the download
-  // container — leaves the daemon no way to create them; SPEC §6.7: in a docker worktree they are only mount points).
-  for (const s of slots) mkdirSync(join(root, s.rel, 'node_modules'), { recursive: true })
-  const masks = maskMounts(root, worktreeEntries(root), { gitDirInTree })
-  if (masks.masked.length) c.log(`agentop run: masked ${masks.masked.length} credential-shaped file(s) of the worktree`)
+  if (masks.masked.length) c.log(`agentop run: masked ${masks.masked.length} credential-shaped file(s) or nested repositor(ies) of the worktree`)
   const envFile = join(execDir, 'env')
-  const extra: Record<string, string> = kind === 'install-download' ? { BUN_INSTALL_CACHE_DIR: '/cache/bun', npm_config_cache: '/cache/npm' } : {}
+  const extra: Record<string, string> = download ? { BUN_INSTALL_CACHE_DIR: '/cache/bun', npm_config_cache: '/cache/npm' } : {}
   writeFileSync(envFile, envFileText(containerEnv({ host: i.env, sid: who.sid, profile: profileEnv, extra, proxy: kind === 'install-download' ? 'http://127.0.0.1:3128' : undefined })), { mode: 0o600 })
   const attempt = newAttemptId()
   const plan = containerPlan({
     kind, name: `${c.prefix}-${c.inst8}-${who.sid}-${kind}-${hex(3)}`, image: c.image.ref, uid: c.uid, gid: c.gid, memoryBytes,
     root, cwd: i.cwd, envFile, labels: labelsFor(c, who.sid, kind, attempt), volumes, nm: slots, masks: masks.mounts as MountSpec[],
-    optDir: c.optDir, saidaDir, sockDir: i.sockDir, ttlSec: i.ttlSec, argv: i.command,
+    optDir: c.optDir, saidaDir, sockDir: i.sockDir, stagingDir: download ? i.stagingDir : undefined, ttlSec: i.ttlSec, argv: i.command,
   })
   const self = procReader()(process.pid)
   withLedger(c.dataDir, l => {

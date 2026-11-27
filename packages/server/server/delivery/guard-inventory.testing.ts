@@ -40,7 +40,37 @@ export interface ReachInventory { base: string; writers: Record<string, string[]
  * so the repo-wide raw-writer count shrinks. Its own sites (and `sessions/native-notes.ts` as a new importer) are the
  * only entries added; the ceiling stays shrink-only from here.
  */
-export const R3_INVENTORY_DIGEST = 'cec4861f79f0d0d467a5dcbadf68c1c07628a5d76e378e80baeb363355e3a8ba'
+/**
+ * DOCKER.AMBIENTES S2 admission (2026-11-27, t-e1dea7cd6f / s-072b26eace, leader decision recorded on the subtask):
+ * the per-command Docker backend needs IO the shrink-only ceiling did not have. ONLY new sites of
+ * `server/server/docker-env/` plus ONE site of `cli-run.ts` are added; no existing site changes class. Each, and why:
+ *   cli-run.ts:939            spawn  re-enter `agentop heavy -- agentop run …` so the LAUNCHER holds the heavy lock
+ *   docker-env/docker-cli.ts:26,35 spawnSync/spawn of the `docker` client — the ONE door, every argv through argvRefusal
+ *   docker-env/docker-run.ts:72     spawnSync git  (worktree root, untracked/ignored list for the masks)
+ *   docker-env/docker-run.ts:126    writeFileSync  agentop's own exec-wrap/fwd.mjs under <dataDir>/docker/opt (0555)
+ *   docker-env/docker-run.ts:159    spawnSync tmux (list-panes: the session's root pid, identity by ancestry)
+ *   docker-env/docker-run.ts:301,308 spawnSync du / df (the disk watchdog)
+ *   docker-env/docker-run.ts:320,336 write/remove the helper containers' env-file (0600)
+ *   docker-env/docker-run.ts:383,397 write/remove the command's --env-file (0600, removed right after create)
+ *   docker-env/docker-run.ts:399,430 remove the exec's run dir
+ *   docker-env/egress-proxy.ts:37,71 the egress journal (host/port/decision only) and the fresh unix socket
+ *   docker-env/env-install.ts:83,95  remove the egress socket dir and the helper env-file
+ *   docker-env/ledger.ts:53-55,66-68,73 the ledger's atomic write (0600 + fsync + rename) and its O_EXCL lock file
+ *     (synchronous on purpose: decided inside the cross-process lock; `durableWrite` is async).
+ * Round 2 (SPEC r4 fixes, same decision): new sites ONLY, nothing existing changes class —
+ *   docker-env/env-install.ts  remove the per-install staging dir (twice: refusal and end) and the egress socket dir
+ *   docker-env/ledger.ts       the lock is now published with link(2) from a private pid file (+ removal of that temp
+ *     file and of a stale lock): same file, same single-writer purpose, no longer observable empty
+ *   docker-env/staging.ts      the host-generated staging the download container mounts INSTEAD of the worktree
+ *     (copies of package.json / lockfile / workspace file + one generated .npmrc, mode 0700/0600, under <dataDir>/docker/run)
+ * Book-reach texts added (neither is agentop's data dir): docker-env/env-profile.ts `PROFILE_REL` = the REPO's
+ *   `.agentistics/env.yml` (worktree-relative), and docker-env/plans.ts `VOLUME_MARKER` = `/v/.agentistics-volume`, a path
+ *   INSIDE a container's view of a volume root.
+ * Capability-bearing modules added (fs / child_process): docker-cli, docker-run, egress-proxy, env-install, ledger,
+ * session-proof (reads /proc only); helper importers: docker-run, env-install. Fixtures, fakes and live proofs are
+ * `*.testing.ts` and stay outside the inventory. The ceiling stays shrink-only from here.
+ */
+export const R3_INVENTORY_DIGEST = 'fc818e00d7e48230b6adcc8e84ae9967cb8b9b072f1c735d8ff0a8f954f8f2b9'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')
@@ -70,7 +100,7 @@ export function liveInventory(pkgs: string): { writers: Record<string, string[]>
 /** Independently pinned r3 source ceiling. Capability-bearing modules may disappear, never grow. */
 export function moduleCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-modules.fixture.json'), 'utf8')
-  if (digest(text) !== '621a0c21df8f3e574daa01c6ad0f509721f0308ac80a0ed534e95e12c083d73e') throw new Error('Historical module capability inventory changed: shrink only')
+  if (digest(text) !== '23d89606f99dcfede59a9b649ae350f5174c6dd71a77edd814d6901cbe02fe87') throw new Error('Historical module capability inventory changed: shrink only')
   return JSON.parse(text).modules
 }
 
@@ -101,6 +131,6 @@ export function helperInventory(sources: Readonly<Record<string, string>>, base 
 /** r5 pins existing helper reuse independently; new importers must never be added to this ceiling. */
 export function helperCeiling(): Record<string, string[]> {
   const text = readFileSync(join(import.meta.dir, 'guard-helpers.fixture.json'), 'utf8')
-  if (digest(text) !== '79e4214b782c9472676c80a7b63d40cd3721731407830b897a9cdc8aae4fdae5') throw new Error('Historical raw-writer helper inventory changed: shrink only')
+  if (digest(text) !== '361e334b6e367744eade103a673ae12904c6080e6a44963a69b6e0648a26fe68') throw new Error('Historical raw-writer helper inventory changed: shrink only')
   return JSON.parse(text)
 }

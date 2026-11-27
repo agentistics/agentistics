@@ -64,10 +64,19 @@ describe('argv (SPEC §3.3, §13 S2)', () => {
     expect(m.some(x => x.type === 'tmpfs')).toBe(false)
     expect(m.every(x => x.type !== 'volume' || x.subpath)).toBe(true) // never a volume root
   })
-  test('the download container: worktree read-only, no scratch', () => {
-    const m = plan({ kind: 'install-download', volumes: { scratch: 'sc', nm: 'agentistics-ab12cd34-nm-s1-g1', cache: 'cache-bun' } }).mounts
-    expect(m.find(x => x.target === '/w')!.readonly).toBe(true)
+  test('the download container (r4 #2): NEVER the worktree — only the read-only host staging; no scratch, no masks', () => {
+    const p = plan({ kind: 'install-download', stagingDir: '/stage/x', volumes: { scratch: 'sc', nm: 'agentistics-ab12cd34-nm-s1-g1', cache: 'cache-bun' }, masks: [{ type: 'bind', source: '/dev/null', target: '/w/.env', readonly: true }] })
+    const m = p.mounts
+    expect(m.find(x => x.target === '/w')).toEqual({ type: 'bind', source: '/stage/x', target: '/w', readonly: true })
+    expect(m.some(x => x.source === '/w')).toBe(false)
     expect(m.some(x => x.source === 'sc')).toBe(false)
+    expect(m.some(x => x.target === '/w/.env')).toBe(false)
+    expect(p.workdir).toBe('/w')
+    // the cache is the one writable non-nm place, and it is NOT reachable together with the worktree
+    expect(m.find(x => x.target === '/cache')).toMatchObject({ source: 'cache-bun', readonly: false })
+  })
+  test('the download container without a staging directory cannot be planned (never falls back to the worktree)', () => {
+    expect(() => plan({ kind: 'install-download', volumes: { scratch: 'sc', nm: 'n', cache: 'c' } })).toThrow(/staging/)
   })
   const refused: [string, string[]][] = [
     ['build', ['build', '.']], ['buildx', ['buildx', 'build', '.']], ['network', ['network', 'connect', 'x', 'y']],

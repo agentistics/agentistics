@@ -1187,6 +1187,28 @@
     ],
     "server/server/sessions/cli-leads.ts": [
       "module:fs"
+    ],
+    "server/server/docker-env/docker-cli.ts": [
+      "module:child_process"
+    ],
+    "server/server/docker-env/docker-run.ts": [
+      "module:child_process",
+      "module:fs"
+    ],
+    "server/server/docker-env/egress-proxy.ts": [
+      "module:fs"
+    ],
+    "server/server/docker-env/env-install.ts": [
+      "module:fs"
+    ],
+    "server/server/docker-env/ledger.ts": [
+      "module:fs"
+    ],
+    "server/server/docker-env/session-proof.ts": [
+      "module:fs"
+    ],
+    "server/server/docker-env/staging.ts": [
+      "module:fs"
     ]
   }
 }
