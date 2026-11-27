@@ -102,6 +102,7 @@ test('session kind labels in both languages never fall back to sender ids', () =
     ['handback', 'Tarefa entregue', 'Task handed back'],
     ['block', 'Sessão bloqueada', 'Session blocked'],
     ['session-question', 'Pergunta de uma sessão', 'Question from a session'],
+    ['session-notice', 'Aviso', 'Notice'],
   ] as const) {
     const event = { kind, sender: 'raw-session-id', body: '' }
     expect(systemEventLine(event, true)).toBe(pt)
@@ -110,6 +111,20 @@ test('session kind labels in both languages never fall back to sender ids', () =
     expect(systemEventLine(event, false, '[ LEADER ] - Review')).toBe(`${en} · Review`)
   }
   expect(systemEventTitle('[ LEADER ] - ')).toBeUndefined()
+})
+
+test('a session notice is a neutral info row, never a delivery', () => {
+  const event = parseSystemEvent('[from session 4c5cb63d · notice — no reply needed]\nO líder do Motor mudou: agora é 514ce7bc43.')
+  expect(event).toEqual({ kind: 'session-notice', sender: '4c5cb63d', body: 'O líder do Motor mudou: agora é 514ce7bc43.' })
+  expect(systemEventLine(event!, true, '[ LÍDER ] - Motor')).toBe('Aviso · Motor')
+  expect(systemEventLine(event!, false, '[ LEADER ] - Motor')).toBe('Notice · Motor')
+  for (const pt of [true, false]) expect(systemEventLine(event!, pt, 'Motor')).not.toMatch(/entregue|handed back/i)
+  // Also when the harness wrapped the typed-in block.
+  expect(parseSystemEvent('<pasted_content id="n1">\n[from session abc · notice — no reply needed]\nfyi\n</pasted_content id="n1">')?.kind).toBe('session-notice')
+  // The three older session kinds are unchanged.
+  expect(parseSystemEvent('[from session abc · handback]\nx')?.kind).toBe('handback')
+  expect(parseSystemEvent('[from session abc · block]\nx')?.kind).toBe('block')
+  expect(parseSystemEvent('[from session abc · question]\nx')?.kind).toBe('session-question')
 })
 
 test('sender resolution includes ended rows and full or short conversation ids', () => {

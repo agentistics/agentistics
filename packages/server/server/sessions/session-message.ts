@@ -18,7 +18,12 @@ import type { FleetRowForGroups } from './session-groups-web'
 import { noteMessageTo } from './last-message'
 import { intermediateNote, judgeHandback, type HandbackVerdict } from './handback-intent'
 
-export const MESSAGE_KINDS = ['handback', 'block', 'question'] as const
+/**
+ * `notice` is informational (a leader handover, an id/role change, an FYI): it is typed in with a header saying no reply is
+ * needed, mirrored on the sender's task as a PLAIN comment at most, and never moves a subtask, never counts as delivered work
+ * and never feeds the handback flow (owner, 27/11: a handover sent as `handback` read "Tarefa entregue" and cost a turn).
+ */
+export const MESSAGE_KINDS = ['handback', 'block', 'question', 'notice'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]
 export const isMessageKind = (v: unknown): v is MessageKind => (MESSAGE_KINDS as readonly string[]).includes(v as string)
 
@@ -96,7 +101,7 @@ export type MessageReply =
 const MESSAGES: Record<string, string> = {
   unverified_sender: 'Only a session started by agentistics can send messages (its identity could not be verified).',
   missing_argument: '`to`, `kind` and a non-empty `body` are required.',
-  bad_kind: 'kind must be handback, block or question.',
+  bad_kind: 'kind must be handback, block, question or notice.',
   bad_awaiting: '`awaiting` is only valid with kind=handback, and must be one line of at most 200 characters.',
   no_such_session: 'No session on this machine matches that reference.',
   ambiguous_session: 'More than one session matches that reference; use its id.',
@@ -111,9 +116,12 @@ const fail = (code: string, message?: string, matches?: string[]): MessageReply 
   ok: false, code, message: message ?? MESSAGES[code] ?? code, ...(matches && matches.length > 0 ? { matches } : {}),
 })
 
+/** The header word of a `notice`: it tells the receiving model, in the message itself, that no answer is expected. */
+export const NOTICE_HEADER_KIND = 'notice — no reply needed'
+
 /** The one-line header every delivered message starts with. */
 export function messageHeader(senderId: string, kind: MessageKind): string {
-  return `[from session ${senderId} · ${kind}]`
+  return `[from session ${senderId} · ${kind === 'notice' ? NOTICE_HEADER_KIND : kind}]`
 }
 
 /** Pair → last accepted send, epoch ms. */
@@ -170,7 +178,7 @@ export async function sendSessionMessage(
       author: `session:${senderId.slice(0, 8)}`,
       body,
       ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
-      ...(kind !== 'question' ? { kind } : {}),
+      ...(kind === 'handback' || kind === 'block' ? { kind } : {}),
       session: senderId,
       message: { to: target.id, kind, ...(verdict.intermediate ? { intermediate: true } : {}) },
     }).catch(() => ({ ok: false }))
