@@ -798,7 +798,7 @@ export async function fleetLiveSessions(
   return out
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number; agentUse?: AgentUseView }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number; agentUse?: AgentUseView; /** CONTAS.AVISO-LIDER: since when (epoch ms) the account is available for agents, while it is. */ availableSince?: number }
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -1002,6 +1002,8 @@ export async function planLimitsPayload(
         b.freeSlots = 0
         b.suggestedParallel = 0
       }
+      // CONTAS.AVISO-LIDER: the moment the leader notice saw it become available (a broken login is not).
+      if (rec?.agentAvailability?.available && b.spawnable !== false && b.status !== 'hold') b.availableSince = rec.agentAvailability.since
     }
   }
   // Only rows agents may see compete, and only an account the registry says is the same login.

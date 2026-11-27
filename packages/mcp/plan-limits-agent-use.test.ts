@@ -26,4 +26,10 @@ describe('agentistics_plan_limits — the two agent-use switches and the reason'
     expect(out.budgets[0].agentUse).toEqual({ on: true, reason: 'override-on', enabled: true, override: true })
     expect(out.offBySchedule).toBeUndefined()
   })
+  test('CONTAS.AVISO-LIDER: a visible row says since when it is available (availableSince, epoch ms)', () => {
+    const out = planLimitsTool(undefined, {
+      budgets: [{ harness: 'claude', account: 'acc_2', availableSince: 1_790_000_000_000, agentUse: { on: true, reason: 'in-window', enabled: true, override: false } }],
+    })
+    expect(out.budgets[0].availableSince).toBe(1_790_000_000_000)
+  })
 })

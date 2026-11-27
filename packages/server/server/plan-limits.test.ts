@@ -609,6 +609,19 @@ test('CONTAS.AGENDA-SALVAR: Agenda on + override on reads override-on and stays 
   const body = await planLimitsPayload(undefined, now, [])
   expect(body.budgets.find(b => b.account === rec.id)?.agentUse).toMatchObject({ reason: 'override-on', on: true, enabled: true, override: true })
 })
+
+test('CONTAS.AVISO-LIDER: a visible row carries availableSince from the stored state; an unavailable state carries none', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'known-login', label: 'Known account' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['claude'])
+  const rec = (await store.list(['claude']))[0]!
+  await ingestPlanLimits({ harness: 'claude', account: rec.id, plan: 'Max', windows: [{ kind: '5h', usedPct: 10, resetsAt: now + 3_600_000 }], updatedAt: now, source: 'claude-stream' })
+  await updateAccountForTest(store, rec.id, { agentAvailability: { available: true, since: now - 60_000, notifiedAt: now - 60_000 } })
+  expect((await planLimitsPayload(undefined, now, [])).budgets.find(b => b.account === rec.id)?.availableSince).toBe(now - 60_000)
+  await updateAccountForTest(store, rec.id, { agentAvailability: { available: false, since: now } })
+  expect((await planLimitsPayload(undefined, now, [])).budgets.find(b => b.account === rec.id)?.availableSince).toBeUndefined()
+})
 const updateAccountForTest = (store: { patchAccount: (id: string, patch: Record<string, unknown>) => Promise<unknown> }, id: string, patch: Record<string, unknown>) => store.patchAccount(id, patch)
 
 // ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
