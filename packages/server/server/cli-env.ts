@@ -28,6 +28,7 @@ const USAGE = [
   'usage: agentop env status [--json] [--session [id]] [--project [key]] [--needs git,…] [--image key]',
   '       agentop env use docker|namespace [--session [id] | --project [key] | --all]',
   '       agentop env install-hint [--os linux|wsl2|macos|windows] [--json]',
+  '       agentop env install   (Docker backend: install the dependencies into this session\'s node_modules volume)',
 ].join('\n')
 
 /** `--flag` with an optional value: the next token is the value unless it is another flag. */

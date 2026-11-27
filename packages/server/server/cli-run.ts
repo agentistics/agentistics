@@ -10,6 +10,7 @@ import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } fr
 import { blockedPorts, createCtlDir, netnsHardening, outsideNodeModules, persistenceGuard, hostAddresses, forwardPorts, netnsArgv, netnsNotice, pollHostAddresses, probeNetns, removeCtlDir, startSlirp, stopSlirp } from './run-netns'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 import { scopeStatsLine, watchScope, type ScopeIo } from './run-scope-stats'
+import { featureOn } from '@agentistics/core'
 
 /** The run's memory cap (systemd `MemoryMax`), as passed and in bytes for the closing stats line. */
 export const RUN_MEMORY_MAX = '2G'
@@ -907,9 +908,42 @@ export async function runRun(args: string[]): Promise<number> {
       await stopState(JSON.parse(readFileSync(stateFile, 'utf8')) as ThrowawayState)
       return 0
     }
+    const docker = await maybeDockerRun(parsed, args)
+    if (docker !== null) return docker
     return await startRun(parsed)
   } catch (error) {
     console.error(`${error instanceof Error ? error.message : String(error)}\n\n${usage()}`)
     return 2
   }
+}
+
+/**
+ * DOCKER.AMBIENTES S2: `agentop run --rm -- <cmd>` runs the command in a disposable container when — and only
+ * when — the `docker-env` flag is on AND `decideEnvBackend` answers `docker` for this session/project (a person or
+ * leader chose it with `agentop env use docker`). Anything else returns `null` and today's namespace run proceeds.
+ * The launcher holds the heavy lock (re-entered through `agentop heavy`), never the container: dockerd starts it,
+ * so no container process inherits the lock's fd. `--serve` stays on the namespace backend in this slice.
+ */
+async function maybeDockerRun(options: RunOptions, args: string[]): Promise<number | null> {
+  if (options.serve || !options.command.length || !featureOn('docker-env')) return null
+  const ops = await import('./flows/host-ops')
+  const io = await ops.envCliIo()
+  const status = await (await import('./env-web')).envStatus({ session: process.env.AGENTOP_MANAGED_ID, project: await io.cwdProject() }, await ops.defaultEnvDeps())
+  if (!status.decision.docker) {
+    if (status.choice.backend === 'docker' && status.decision.line) console.error(`agentop run: ${status.decision.line}`)
+    return null
+  }
+  const script = process.argv[1]
+  const launcher = script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script] : [process.execPath]
+  if (shouldWrapHeavy({ hasCommand: true, linux: process.platform === 'linux', hasFlock: !!hostWhich('flock'), inside: insideHeavyLock(process.env, ancestorCmdlines()) })) {
+    const child = spawn(process.execPath, [...launcher.slice(1), 'heavy', '--', ...launcher, 'run', ...args], { stdio: 'inherit' })
+    const forward = (sig: NodeJS.Signals) => { try { child.kill(sig) } catch {} }
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, forward)
+    return await new Promise<number>(resolve => { child.once('exit', (code, sig) => resolve(code ?? (sig ? 128 + 15 : 1))); child.once('error', () => resolve(1)) })
+  }
+  const { runInDocker } = await import('./docker-env/docker-run')
+  const out = await runInDocker({ command: options.command, cwd: process.cwd(), ttlSec: parseTtl(options.ttl), dataDir: realDataDir(), env: process.env })
+  if (out.ran) { console.log(`exit ${out.code}`); return out.code }
+  console.error(`agentop run: ${out.reason}`)
+  return out.fallback ? null : out.code
 }

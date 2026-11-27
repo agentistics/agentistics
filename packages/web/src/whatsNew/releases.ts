@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [
+      {
+        pt: 'Experimental, atrás de uma opção desligada por padrão: com o Docker escolhido, cada comando de um agente (`agentop run --rm`) roda numa caixa Docker descartável, sem rede, sem acesso aos seus arquivos fora do projeto e sem as suas chaves.',
+        en: 'Experimental, behind an option that is off by default: with Docker chosen, each command an agent runs (`agentop run --rm`) runs in a disposable Docker box, with no network, no access to your files outside the project and none of your keys.',
+      },
+      {
+        pt: 'As dependências entram por um comando próprio (`agentop env install`), o único passo com saída para a internet, e só para os sites de pacotes.',
+        en: 'Dependencies come in through their own command (`agentop env install`), the only step with a way out to the internet, and only to package sites.',
+      },
+    ],
+    fixes: [],
+  },
   '2.230.5': {
     features: [],
     fixes: [

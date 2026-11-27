@@ -459,6 +459,16 @@ if (command === 'experimental') {
   process.exit(await runExperimental(args))
 }
 
+// DOCKER.AMBIENTES S2: `agentop env install` — the fixed dependency verb of the Docker backend (behind `docker-env`).
+if (command === 'env' && args[0] === 'install') {
+  const { featureOn } = await import('@agentistics/core')
+  if (!featureOn('docker-env')) { console.log('docker-env flag: off (agentop experimental enable, or AGENTISTICS_DOCKER_ENV=1)'); process.exit(0) }
+  const { envInstall } = await import('../server/docker-env/env-install.ts')
+  const { realDataDir } = await import('../server/cli-run.ts')
+  const r = await envInstall({ cwd: process.cwd(), dataDir: realDataDir(), env: process.env })
+  ;(r.code === 0 ? console.log : console.error)(`agentop env install: ${r.message}`)
+  process.exit(r.code)
+}
 if (command === 'env') process.exit(await (await import('../server/cli-env.ts')).runEnv(args, { io: await (await import('../server/flows/host-ops.ts')).envCliIo() }))
 
 if (command === 'journal') process.exit(await (await import('../server/cli-journal.ts')).runJournal(args))
