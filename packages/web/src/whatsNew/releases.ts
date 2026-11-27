@@ -10,6 +10,12 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Com muita atividade ao mesmo tempo, a tela e os agentes recebem os dados em até um quarto de segundo, mesmo enquanto uma atualização mais nova ainda está sendo montada. Antes podiam esperar alguns segundos.',
+        en: 'Under heavy activity, the screen and agents now get their data within a quarter of a second, even while a newer update is still being built. Before, they could wait a few seconds.',
   '2.230.5': {
     features: [],
     fixes: [
