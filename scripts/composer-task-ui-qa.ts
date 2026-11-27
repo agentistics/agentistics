@@ -49,11 +49,11 @@ try {
     const selectedDay = new Date().getDate() === 15 ? '16' : '15'
     await panel.locator(`button[aria-label$="-${selectedDay}"]`).click()
     await panel.locator('input[type="time"]').fill('14:35')
-    for (const priority of ['Urgent', 'High', 'Medium', 'Low']) {
-      await panel.locator('button[title="Prioridade"]').click()
+    for (const priority of ['Urgente', 'Alta', 'Média', 'Baixa']) {
+      await panel.locator('label button').first().click()
       await page.locator('[data-chip-select-panel]').getByRole('button', { name: priority, exact: true }).click()
       await page.mouse.move(width - 4, 10)
-      await page.screenshot({ animations: 'disabled', path: join(output, `${width}-${priority.toLowerCase()}.png`) })
+      await page.screenshot({ animations: 'disabled', path: join(output, `${width}-${priority.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')}.png`) })
     }
     if (width === 390) {
       const target = await panel.locator('button[aria-current="date"]').boundingBox()

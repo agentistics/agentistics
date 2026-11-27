@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.229.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Registrar tarefa no tema claro: os dias do calendário de prazo voltaram a aparecer (estavam brancos sobre fundo claro). Os dias que não podem ser escolhidos também ficaram legíveis, em todos os calendários do app.',
+        en: 'Register a task in the light theme: the days in the due-date calendar are visible again (they were white on a light background). Days that cannot be picked are readable too, in every calendar of the app.',
+      },
+      {
+        pt: 'No mesmo painel, a prioridade agora aparece em português, e o balão que cobria o valor escolhido saiu.',
+        en: 'In the same panel, the priority now follows your language, and the tooltip that covered the chosen value is gone.',
+      },
+    ],
+  },
   '2.229.6': {
     features: [],
     fixes: [

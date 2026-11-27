@@ -65,7 +65,9 @@ test('glass tooltip, shared priority menu, Today, local time and dismissals pres
   expect(document.querySelector('[role="tooltip"] svg')?.getAttribute('stroke')).toBe('var(--anthropic-orange)')
   await act(async () => trigger.click())
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
-  const priority = document.querySelector<HTMLButtonElement>('[title="Priority"]')!
+  // The visible label is the name; no `title`, which drew a tooltip over the selected value.
+  expect(document.querySelector('[role="dialog"] [title]')).toBeNull()
+  const priority = document.querySelector<HTMLButtonElement>('[role="dialog"] label button')!
   await act(async () => priority.click())
   const choices = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-chip-select-panel] button'))
   expect(choices.map(b => b.textContent)).toEqual(['Urgent', 'High', 'Medium', 'Low'])
@@ -92,6 +94,27 @@ test('glass tooltip, shared priority menu, Today, local time and dismissals pres
   let taken: ReturnType<typeof state.take> = {}
   await act(async () => { taken = state.take('Deadline task') })
   expect(taken.asTask).toEqual({ priority: 'urgent', dueDate: `${day}T14:35` })
+})
+
+test('pt-BR names every priority and calendar days are drawn with theme text tokens', async () => {
+  function Harness() {
+    const state = useComposerTask()
+    return <ComposerTaskButton options={state.options} onChange={state.setOptions} disabled={false} pt />
+  }
+  host = document.createElement('div'); document.body.append(host)
+  await act(async () => { root = createRoot(host); root.render(<Harness />) })
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-composer-task-trigger]')!.click())
+  const priority = document.querySelector<HTMLButtonElement>('[role="dialog"] label button')!
+  expect(priority.textContent).toBe('Média')
+  await act(async () => priority.click())
+  const choices = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-chip-select-panel] button'))
+  expect(choices.map(b => b.textContent)).toEqual(['Urgente', 'Alta', 'Média', 'Baixa'])
+  // Next month: no day there is today or selected, so every one is a plain day.
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Próximo mês"]')!.click())
+  const days = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+    .filter(b => /^\d{4}-\d{2}-\d{2}$/.test(b.getAttribute('aria-label') ?? ''))
+  expect(days.length).toBeGreaterThanOrEqual(28)
+  expect(new Set(days.map(b => b.style.color))).toEqual(new Set(['var(--text-primary)']))
 })
 
 test('turn off is explicit and deadline selection can navigate to future months', async () => {
