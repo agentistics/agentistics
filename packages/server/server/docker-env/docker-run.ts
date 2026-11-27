@@ -373,6 +373,9 @@ export async function runCommand(c: Ctx, i: DockerRunInput, who: { sid: string; 
   mkdirSync(execDir, { recursive: true, mode: 0o700 })
   const saidaDir = join(dockerDir(c.dataDir), 'saida', who.sid)
   mkdirSync(saidaDir, { recursive: true, mode: 0o700 })
+  // The node_modules mount points exist on the host as EMPTY directories (a read-only worktree bind — the download
+  // container — leaves the daemon no way to create them; SPEC §6.7: in a docker worktree they are only mount points).
+  for (const s of slots) mkdirSync(join(root, s.rel, 'node_modules'), { recursive: true })
   const masks = maskMounts(root, worktreeEntries(root), { gitDirInTree })
   if (masks.masked.length) c.log(`agentop run: masked ${masks.masked.length} credential-shaped file(s) of the worktree`)
   const envFile = join(execDir, 'env')
