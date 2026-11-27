@@ -69,6 +69,43 @@ describe('handback moves the sender\'s subtask', () => {
   })
 })
 
+describe('kind=notice is information, never a delivery', () => {
+  test('accepted, typed in with a no-reply header, mirrored as a plain note, no subtask move, no handback event', async () => {
+    const moved: string[] = []
+    const events: unknown[] = []
+    const stamped: string[] = []
+    const f = fake({
+      senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }),
+      handbackSubtask: async id => { moved.push(id) },
+      handbackEvent: async e => { events.push(e) },
+      stampProvenance: async id => { stamped.push(id) },
+    })
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'Motor leader is now 514ce7bc43' }, f.deps)
+    expect(out).toMatchObject({ ok: true, kind: 'notice', delivered: true, mirrored: true })
+    expect(f.prompts).toEqual([{ id: 'parent-1', text: '[from session child-1 · notice — no reply needed]\nMotor leader is now 514ce7bc43' }])
+    expect(messageHeader('child-1', 'notice')).toBe('[from session child-1 · notice — no reply needed]')
+    expect(f.comments).toHaveLength(1)
+    expect(f.comments[0]!.c.kind).toBeUndefined()
+    expect(f.comments[0]!.c.message).toEqual({ to: 'parent-1', kind: 'notice' })
+    expect(moved).toEqual([])
+    expect(events).toEqual([])
+    expect(stamped).toEqual([])
+  })
+  test('awaiting is refused with a notice', async () => {
+    expect(await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'x', awaiting: 'y' }, fake().deps))
+      .toMatchObject({ ok: false, code: 'bad_awaiting' })
+  })
+  test('the three older kinds keep their headers and comment tags', async () => {
+    for (const kind of ['handback', 'block', 'question'] as const) {
+      resetMessageRateLimit()
+      const f = fake({ senderTask: async () => ({ taskId: 't1' }) })
+      await sendSessionMessage('child-1', { to: 'parent-1', kind, body: 'x' }, f.deps)
+      expect(f.prompts[0]!.text).toBe(`[from session child-1 · ${kind}]\nx`)
+      expect(f.comments[0]!.c.kind).toBe(kind === 'question' ? undefined : kind)
+    }
+  })
+})
+
 describe('FLUXO.AVISOS 8: an intermediate handback is not a final one', () => {
   const filed = { senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }) }
   test('awaiting: recorded and delivered, but the subtask stays put and the mirror says intermediate', async () => {

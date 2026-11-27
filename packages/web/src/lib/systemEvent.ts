@@ -13,7 +13,7 @@ import { parseInjectedHeader, roleLine, slashInvocation, unwrapAllPasted } from 
  * so the header is no longer the first line. Whole-message wrappers are unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'rename' | 'relay' | 'notice' | 'session-note' | 'flow'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'session-notice' | 'checkin' | 'role' | 'rename' | 'relay' | 'notice' | 'session-note' | 'flow'
 
 export interface SystemEvent {
   kind: SystemEventKind
@@ -88,6 +88,8 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
   if (h.origin === 'flow') return { kind: 'flow', flow: h.flow!, label: what, body }
   if (what === 'handback' || what === 'block') return { kind: what, sender: h.sender, body }
   if (what === 'question') return { kind: 'session-question', sender: h.sender, body }
+  // `notice — no reply needed`: an FYI from another session (a leader handover, an id change) — never a delivery.
+  if (/^notice\b/.test(what)) return { kind: 'session-notice', sender: h.sender, body }
   return { kind: 'session-note', sender: h.sender, label: what, body }
 }
 
@@ -118,6 +120,7 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
     case 'handback': return (pt ? 'Tarefa entregue' : 'Task handed back') + suffix
     case 'block': return (pt ? 'Sessão bloqueada' : 'Session blocked') + suffix
     case 'session-question': return (pt ? 'Pergunta de uma sessão' : 'Question from a session') + suffix
+    case 'session-notice': return (pt ? 'Aviso' : 'Notice') + suffix
     case 'relay': return pt ? 'Mensagem encaminhada da sessão anterior' : 'Forwarded from the previous session'
     case 'notice':
       if (e.label === 'handoff') return pt ? 'Passagem de bastão · sistema' : 'Handoff context · system'

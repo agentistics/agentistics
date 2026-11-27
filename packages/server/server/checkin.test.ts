@@ -757,6 +757,9 @@ describe('idle check-ins', () => {
     expect(checkinActivity([{ kind: 'comment', detail: 'on task' }, { kind: 'comment', detail: '{' },
       { kind: 'checkin', detail: JSON.stringify({ message: { to: leader.id, kind: 'question' } }) }] as any, leader.id)).toEqual([])
   })
+  test('a notice to the leader is never counted as delivered work', () => {
+    expect(checkinActivity([{ kind: 'comment', detail: JSON.stringify({ message: { to: leader.id, kind: 'notice' } }) }] as any, leader.id)).toEqual([])
+  })
   for (const state of ['lost', 'closed', 'exited']) {
     test(`${state} workers cannot keep heartbeats alive`, async () => {
       await begin(); rows.push({ ...worker, state })

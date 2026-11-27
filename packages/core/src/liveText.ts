@@ -12,6 +12,7 @@ const KIND_WORD: Record<string, { pt: string; en: string }> = {
   handback: { pt: 'handback', en: 'handback' },
   block: { pt: 'bloqueio', en: 'block' },
   question: { pt: 'pergunta', en: 'question' },
+  notice: { pt: 'aviso', en: 'notice' },
 }
 
 /** Does the text look like a JSON object/array the machine wrote (possibly behind a `↳ ` arrow)? */

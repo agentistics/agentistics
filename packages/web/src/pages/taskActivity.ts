@@ -31,6 +31,7 @@ export function activitySentence(event: TaskEvent, lang: Lang, statuses: readonl
       if (message?.kind === 'handback') return pt ? 'Enviou trabalho para revisão.' : 'Sent work for review.'
       if (message?.kind === 'block') return pt ? 'Comunicou um bloqueio.' : 'Reported a blocker.'
       if (message?.kind === 'question') return pt ? 'Enviou uma pergunta.' : 'Sent a question.'
+      if (message?.kind === 'notice') return pt ? 'Enviou um aviso.' : 'Sent a notice.'
     } catch { /* Older comments store a target phrase instead of message metadata. */ }
     const target = event.detail?.match(/^on (subtask|group) "(.+)"$/)
     if (target && !internalId.test(target[2]!)) return pt
