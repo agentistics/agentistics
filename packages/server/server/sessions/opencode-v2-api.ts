@@ -166,7 +166,7 @@ export function isOpencodeV2(dbPath: string, stateDir: string): boolean {
 export interface OpencodeV2Status { reachable: boolean; at: number; reason?: string }
 let lastStatus: OpencodeV2Status | null = null
 export const opencodeV2Status = (): OpencodeV2Status | null => lastStatus
-export function resetOpencodeV2(): void { lastStatus = null; caches.clear() }
+export function resetOpencodeV2(): void { lastStatus = null; caches.clear(); backoff = null }
 
 const caches = new Map<string, { at: number; value: unknown }>()
 
@@ -198,18 +198,35 @@ const defaultFetch: FetchLike = (url, init) => fetch(url, init) as unknown as Re
 
 function fail(reason: string, now: number): null { lastStatus = { reachable: false, at: now, reason }; return null }
 
+/**
+ * PERF.SERVIDOR-OCIOSO — a service that did not answer is not asked again before its BACKOFF ends: 2.5 s, doubling to
+ * 5 min. It used to be one fixed 2.5 s, so a `service.json` naming a dead port (`127.0.0.1:49374` on the owner's Mac)
+ * cost a 3 s timeout every few seconds for as long as the server ran. A NEW record (the service restarted: another
+ * url or password) is asked at once, and an answer forgets the backoff. PURE.
+ */
+export const V2_BACKOFF_MAX_MS = 5 * 60_000
+export function nextV2Backoff(prevMs: number | undefined): number {
+  return prevMs === undefined ? V2_CACHE_TTL_MS : Math.min(V2_BACKOFF_MAX_MS, prevMs * 2)
+}
+let backoff: { record: string; until: number; delayMs: number } | null = null
+
 async function withService<T>(io: V2Io, key: string, load: (s: OpencodeV2Service, f: FetchLike) => Promise<T>): Promise<T | null> {
   const now = (io.now ?? Date.now)()
-  // A service that just failed is not asked again for one TTL: a hung one must not cost 3 s on every fleet poll.
-  if (lastStatus && !lastStatus.reachable && now - lastStatus.at < V2_CACHE_TTL_MS) return null
   let service: OpencodeV2Service | null = null
   try { service = parseServiceRecord(readFileSync(join(io.stateDir, 'service.json'), 'utf8')) } catch { /* absent */ }
   if (!service) return fail('service.json absent', now)
+  const record = `${service.url}|${service.password}`
+  if (backoff && backoff.record === record && now < backoff.until) return null
   try {
     const value = await cached(`${service.url}|${key}`, V2_CACHE_TTL_MS, now, () => load(service!, io.fetch ?? defaultFetch))
     lastStatus = { reachable: true, at: now }
+    backoff = null
     return value
-  } catch (e) { return fail(e instanceof Error ? e.message : 'unreachable', now) }
+  } catch (e) {
+    const delayMs = nextV2Backoff(backoff && backoff.record === record ? backoff.delayMs : undefined)
+    backoff = { record, until: now + delayMs, delayMs }
+    return fail(e instanceof Error ? e.message : 'unreachable', now)
+  }
 }
 
 /** Every session of every project (newest first, paged until a short page). null: service unreachable. */

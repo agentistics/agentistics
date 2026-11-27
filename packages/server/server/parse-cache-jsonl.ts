@@ -9,6 +9,19 @@ import { safeStat } from './utils'
 import type { ParseCache } from './parse-cache'
 import type { FileStamp } from './parse-cache-key'
 
+/**
+ * PERF.SERVIDOR-OCIOSO fase 3 (QA C3) — the local time zone, part of every cache variant (hours are bucketed on the
+ * local clock). Building an `Intl.DateTimeFormat` per FILE per build was ~3–4 % of an idle server's samples; it is
+ * resolved once and again only when `TZ` changes (tests move it; a running server's zone does not).
+ */
+let _zone: { env: string | undefined; zone: string } | null = null
+export function localTimeZone(): string {
+  const env = process.env.TZ
+  if (_zone && _zone.env === env) return _zone.zone
+  _zone = { env, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+  return _zone.zone
+}
+
 /** The file's version, or null when it cannot be stat-ed — in which case there is
  *  nothing to key on and the caller must go to the live parser. */
 export async function stampOf(filePath: string): Promise<FileStamp | null> {
@@ -54,7 +67,7 @@ export async function cachedParseSession(
   // appended to since. It is not hypothetical: the async-agent fix (#373) changed what an
   // invocation carries, and every transcript already in this cache kept answering in the shape from
   // before it. Bump this whenever `SessionMeta` gains, loses or re-means a field this parser fills.
-  const variant = `${SESSION_SHAPE}:${Intl.DateTimeFormat().resolvedOptions().timeZone}:${source}`
+  const variant = `${SESSION_SHAPE}:${localTimeZone()}:${source}`
   const hit = cache.get<SessionMeta>('session', stamp, variant)
   if (hit) return hit
 
@@ -187,7 +200,7 @@ export async function cachedEnrich(
   const stamp = await stampOf(filePath)
   if (!stamp) return null
 
-  const variant = `${ENRICH_SHAPE}:${Intl.DateTimeFormat().resolvedOptions().timeZone}:${metaModel}`
+  const variant = `${ENRICH_SHAPE}:${localTimeZone()}:${metaModel}`
   const hit = cache.get<EnrichResult>('enrich', stamp, variant)
   if (hit) return withSubagentNumbers(hit, filePath)
 

@@ -85,15 +85,41 @@ export interface MacScanResult {
   cwdDenied: boolean
 }
 
+/**
+ * PERF.SERVIDOR-OCIOSO — the processes already found NOT to be a harness, by pid, with the comm and start time that
+ * identify that very process (a recycled pid has another start, an exec another comm). The Linux reader has had this
+ * memo since PERF.SLOW; the macOS one had none, so every `node`/`bun` on a developer's Mac (VS Code, MCP servers,
+ * Electron helpers) paid `ps -o command` + two `lsof` on EVERY sweep — measured on a simulated 600-process host with 60
+ * `node` and no harness: 4 children and 120 pids handed to `lsof` per sweep, forever. With the memo a warm sweep with no
+ * harness is ONE `ps`. Only decisions that rest on what an exec fixes for good (comm, executable, argv) are remembered.
+ */
+export type MacNotHarnessMemo = Map<number, { comm: string; startMs: number | undefined }>
+const defaultMacMemo: MacNotHarnessMemo = new Map()
+/** `etime` has one-second resolution and is read against our clock: the same process reads a start ±1 s apart. */
+const START_TOLERANCE_MS = 2_000
+/** Test seam: forget what the default memo learned. */
+export function resetMacNotHarnessMemo(): void { defaultMacMemo.clear() }
+
 /** Read every running harness process via `ps` + `lsof`. Bun's own pid is excluded from
  *  `foreignPids`, matching the Linux reader's own-pid exclusion. */
-export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun = runAsync): Promise<MacScanResult> {
+export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun = runAsync, memo: MacNotHarnessMemo = defaultMacMemo): Promise<MacScanResult> {
   const bulk = await run(['ps', '-axwwo', 'pid=,etime=,comm='])
   if (!bulk.ok) return { procs: [], psFailed: true, foreignPids: 0, cwdDenied: false }
 
   const entries = parsePsList(bulk.stdout)
   const ownPid = process.pid
   const foreignPids = entries.filter(e => e.pid !== ownPid).length
+  // The memo is as large as the process table and no larger.
+  const alive = new Set(entries.map(e => e.pid))
+  for (const pid of memo.keys()) if (!alive.has(pid)) memo.delete(pid)
+  const startOf = (e: { etime: string }) => processStartFromEtime(e.etime, nowMs)
+  const known = (e: { pid: number; comm: string; etime: string }): boolean => {
+    const m = memo.get(e.pid)
+    if (!m || m.comm !== e.comm) return false
+    const s = startOf(e)
+    return s === undefined || m.startMs === undefined || Math.abs(s - m.startMs) <= START_TOLERANCE_MS
+  }
+  const notHarness = (e: { pid: number; comm: string; etime: string }): void => { memo.set(e.pid, { comm: e.comm, startMs: startOf(e) }) }
 
   // First pass: which pids are even worth the expensive follow-ups. `harnessOfProcess` needs argv
   // for a JS-runtime comm, so a runtime candidate is provisionally kept and resolved below; a comm
@@ -107,6 +133,7 @@ export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun =
   // kernel knows which file it runs (see `executableFromLsofTxt`). Resolved below in ONE `lsof` for all of them.
   const bareNamed: typeof entries = []
   const candidates = entries.filter(e => {
+    if (known(e)) return false
     const base = e.comm.slice(e.comm.lastIndexOf('/') + 1)
     if (JS_RUNTIME_COMMS.has(base)) return true
     if (harnessOf(base, e.comm) === undefined) return false
@@ -123,24 +150,34 @@ export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun =
     const txt = await fdFor(run, 'txt', bareNamed.map(e => e.pid))
     for (const e of bareNamed) {
       const exe = executableFromLsofTxt(txt, e.pid, e.comm, path => harnessOfProcess(e.comm, path, [e.comm]) !== undefined)
-      if (!exe) continue
+      if (!exe) { if (txt.has(e.pid)) notHarness(e); continue }
       exeOf.set(e.pid, exe)
       candidates.push(e)
     }
   }
   if (candidates.length === 0) return { procs: [], psFailed: false, foreignPids, cwdDenied: false }
 
-  const pids = candidates.map(c => c.pid)
-  const [cwds, stdins, argvs] = await Promise.all([fdFor(run, 'cwd', pids), fdFor(run, '0', pids), fullArgvs(run, pids)])
-  let cwdDenied = false
-  const procs: HarnessProcess[] = []
-
+  // argv FIRST (one `ps` for every candidate), and `lsof` only for what argv says is a harness: a `node` running
+  // VS Code's helper is decided here and never costs a descriptor read.
+  const argvs = await fullArgvs(run, candidates.map(c => c.pid))
+  const harnesses: Array<{ entry: (typeof candidates)[number]; argv: string[]; harness: HarnessId }> = []
   for (const entry of candidates) {
     const argv = argvs.get(entry.pid)
     if (!argv || argv.length === 0) continue // exited between the two reads
     const comm = entry.comm.slice(entry.comm.lastIndexOf('/') + 1)
     const harness: HarnessId | undefined = harnessOfProcess(comm, exeOf.get(entry.pid) ?? entry.comm, argv)
-    if (!harness) continue
+    // `isNonInteractiveInvocation` without a tty answer reads argv alone, which an exec fixes for good.
+    if (!harness || isNonInteractiveInvocation(harness, argv)) { notHarness(entry); continue }
+    harnesses.push({ entry, argv, harness })
+  }
+  if (harnesses.length === 0) return { procs: [], psFailed: false, foreignPids, cwdDenied: false }
+
+  const pids = harnesses.map(h => h.entry.pid)
+  const [cwds, stdins] = await Promise.all([fdFor(run, 'cwd', pids), fdFor(run, '0', pids)])
+  let cwdDenied = false
+  const procs: HarnessProcess[] = []
+
+  for (const { entry, argv, harness } of harnesses) {
     const stdinPath = cwdFromLsof(stdins, entry.pid)
     const stdinIsTty = stdinPath === undefined ? undefined : /^\/dev\/(ttys?\d*|pts\/)/.test(stdinPath)
     if (isNonInteractiveInvocation(harness, argv, stdinIsTty)) continue

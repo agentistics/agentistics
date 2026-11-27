@@ -27,8 +27,8 @@ const LIVE_STAGE: Record<Phase, string> = {
 
 /** True when `id` names a TASK that no subtask shares the id with (the vigia keys a task-level piece by its task id). */
 async function isTaskPiece(id: string): Promise<boolean> {
-  const { loadTaskWorld } = await import('../sessions/task-source')
-  const { book } = await loadTaskWorld()
+  const { loadTaskBoardShared } = await import('../sessions/task-source')
+  const { book } = await loadTaskBoardShared()
   return !book.subtasks.some(s => s.id === id) && book.tasks.some(t => t.id === id)
 }
 
@@ -59,8 +59,8 @@ export function defaultDeliveryBoard(): DeliveryBoard {
     async logStep(taskId, subtaskId, step, actor) { await (await web()).logSubtaskStep(taskId, subtaskId, step, actor) },
     async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, ...(subtaskId === taskId ? {} : { subtaskId }) }) },
     async subtaskFinished(subtaskId) {
-      const { loadTaskWorld } = await import('../sessions/task-source')
-      const { book } = await loadTaskWorld()
+      const { loadTaskBoardShared } = await import('../sessions/task-source')
+      const { book } = await loadTaskBoardShared()
       return (book.subtasks.find(s => s.id === subtaskId) ?? book.tasks.find(t => t.id === subtaskId))?.status === 'done'
     },
     async stage(subtaskId, draft) {
@@ -176,8 +176,8 @@ async function slugOfCwd(cwd: string): Promise<string | null> {
  * never compared with somebody else's PRs). A card with no such session has `repos: []`: nothing can be proven for it.
  */
 async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
-  const [{ loadTaskWorld }, { readRegistry }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry')])
-  const { book } = await loadTaskWorld()
+  const [{ loadTaskBoardShared }, { readRegistry }] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry')])
+  const { book } = await loadTaskBoardShared()
   const subs = boardReviewTargets(book)
   const ids = new Set(subs.map(s => s.id))
   const { hintsFromHandbacks } = await import('./batch-proof')
@@ -231,7 +231,7 @@ async function boardReviewPieces(): Promise<import('./service').ReviewPiece[]> {
 export async function stampProvenanceOfSession(id: string, timeoutMs = 8_000): Promise<void> {
   if (process.env.AGENTISTICS_TEST_RUNNER_PID) return
   const work = (async () => {
-    const [{ readRegistry }, { recordPieceProvenance }, { loadTaskWorld }, { deliveredShasIn }, { existsSync }] = await Promise.all([
+    const [{ readRegistry }, { recordPieceProvenance }, { loadTaskBoardShared }, { deliveredShasIn }, { existsSync }] = await Promise.all([
       import('../sessions/registry'), import('../sessions/piece-provenance'), import('../sessions/task-source'), import('../sessions/task-live'),
       import('node:fs'),
     ])
@@ -243,8 +243,8 @@ export async function stampProvenanceOfSession(id: string, timeoutMs = 8_000): P
       exists: existsSync,
       git: async (cwd, args) => { try { return (await execGit(cwd, args)).trim() } catch { return null } },
       repoOf: async cwd => slugOfCwd(cwd),
-      subtask: async sid => (await loadTaskWorld()).book.subtasks.find(s => s.id === sid) ?? null,
-      handbacks: async sid => (await loadTaskWorld()).book.comments.filter(c => c.subtaskId === sid && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => c.body),
+      subtask: async sid => (await loadTaskBoardShared()).book.subtasks.find(s => s.id === sid) ?? null,
+      handbacks: async sid => (await loadTaskBoardShared()).book.comments.filter(c => c.subtaskId === sid && c.kind === 'handback').sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(c => c.body),
       declared: deliveredShasIn,
       write: async (sid, provenance) => { await (await import('../sessions/task-web')).patchSubtask(sid, { provenance }, flowContext()) },
       now: () => new Date().toISOString(),
@@ -361,7 +361,7 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
     if (made.status.id !== 'abandoned') return { ok: false, message: `the board has no "abandoned" status and the one just created is ${made.status.id}` }
   }
   // Re-read at the write boundary: children may have opened after the dialog was built.
-  const { book } = await (await import('../sessions/task-source')).loadTaskWorld()
+  const { book } = await (await import('../sessions/task-source')).loadTaskBoardShared()
   const { subtaskDone } = await import('../sessions/task-model')
   const task = book.tasks.find(t => t.id === subtaskId)
   if (book.subtasks.some(s => (task ? s.taskId === task.id : s.parentGroupId === subtaskId) && !subtaskDone(s.status))) return { ok: false, message: 'this piece has open subtasks; decide them first' }
@@ -376,8 +376,8 @@ async function closeLegacyPiece(subtaskId: string, to: 'done' | 'abandoned'): Pr
  * folder → unknown). ONE read of the board, the registry and the folders; the rule itself is pure and tested there.
  */
 export async function custodyProjectsOf(pieces: ReadonlyArray<{ taskId: string; subtaskId: string }>): Promise<ReadonlyMap<string, string>> {
-  const [{ loadTaskWorld }, { readRegistry }, { resolveCustodyProjects }, prefs] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('./custody-project'), import('../preferences')])
-  const { book } = await loadTaskWorld()
+  const [{ loadTaskBoardShared }, { readRegistry }, { resolveCustodyProjects }, prefs] = await Promise.all([import('../sessions/task-source'), import('../sessions/registry'), import('./custody-project'), import('../preferences')])
+  const { book } = await loadTaskBoardShared()
   const registry = await readRegistry().catch(() => [])
   const groups = ((await prefs.readPreferences().catch(() => ({}))) as { sessionGroups?: { groups: never[] } }).sessionGroups ?? { groups: [] }
   return resolveCustodyProjects({

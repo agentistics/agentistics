@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createRebuildScheduler } from './rebuild-scheduler'
+import { UNWATCHED_DEBOUNCE_MS, UNWATCHED_LOAD_FACTOR, UNWATCHED_MAX_GAP_MS, UNWATCHED_MIN_GAP_MS } from './sse-route'
 
 function harness(minGapMs = 0, load: { maxGapMs?: number; loadFactor?: number } = {}) {
   let t = 0
@@ -27,6 +28,31 @@ function harness(minGapMs = 0, load: { maxGapMs?: number; loadFactor?: number } 
   const finish = async (tookMs = 0) => { t += tookMs; builds.shift()!(); for (let i = 0; i < 5; i++) await Promise.resolve() }
   return { s, advance, finish, builds, rebuilt: () => rebuilt }
 }
+
+describe('PERF.SERVIDOR-OCIOSO: the unwatched pace (nobody connected)', () => {
+  test('the first change builds after the debounce; a steady stream builds every 30–60 s, never later — the store lag bound', async () => {
+    const h = harness(UNWATCHED_MIN_GAP_MS, { maxGapMs: UNWATCHED_MAX_GAP_MS, loadFactor: UNWATCHED_LOAD_FACTOR })
+    h.s.changed()
+    await h.advance(UNWATCHED_DEBOUNCE_MS)
+    expect(h.builds.length).toBe(1) // a quiet machine reacts at once
+    await h.finish(1_000)
+    // writes every 2 s for 3 minutes: the gap between builds stays inside [30 s, 60 s]
+    const starts: number[] = []
+    let t = 0
+    for (let i = 0; i < 90; i++) {
+      h.s.changed()
+      await h.advance(2_000); t += 2_000
+      if (h.builds.length > 0) { starts.push(t); await h.finish(1_000); t += 1_000 }
+    }
+    expect(starts.length).toBeGreaterThanOrEqual(3)
+    for (let i = 1; i < starts.length; i++) {
+      const gap = starts[i]! - starts[i - 1]!
+      expect(gap).toBeGreaterThanOrEqual(UNWATCHED_MIN_GAP_MS)
+      expect(gap).toBeLessThanOrEqual(UNWATCHED_MAX_GAP_MS + 5_000)
+    }
+    expect(UNWATCHED_MAX_GAP_MS).toBeLessThan(5 * 60_000)
+  })
+})
 
 describe('createRebuildScheduler', () => {
   test('a burst of changes is one build, and clients hear about it only when the new data exists', async () => {

@@ -91,7 +91,7 @@ export async function readSpawnBudget(): Promise<SpawnBudget | null> {
   const hog = await readBiggestConsumer().catch(() => null)
 
   const pidsFromProc = await import('../live-sessions')
-    .then(m => m.scanProcesses())
+    .then(m => m.scanProcesses('memory'))
     .then(scan => scan.procs.map(p => p.pid).filter((pid): pid is number => pid !== undefined))
     .catch(() => [] as number[])
 

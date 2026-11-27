@@ -8,8 +8,9 @@ import chokidar from 'chokidar'
 import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH } from './config'
 import { featureOn, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
-import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
+import { dataDirty, invalidateCache, markDataDirty, noteDataChange, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
+import { rebuildRoute, UNWATCHED_DEBOUNCE_MS, UNWATCHED_LOAD_FACTOR, UNWATCHED_MAX_GAP_MS, UNWATCHED_MIN_GAP_MS } from './sse-route'
 import { mirrorFile } from './archive'
 import { onBookWrite } from './sessions/task-store'
 import { harnessEnabled } from './adapters/types'
@@ -27,8 +28,11 @@ export async function notifySseClients() {
   let event = 'event: change\ndata: {}\n\n'
   if (featureOn('adapter-chat')) {
     try {
-      const [{ buildApiResponse }, { patchDataBuild }] = await Promise.all([import('./data'), import('./data-patch')])
-      const patch = patchDataBuild(await buildApiResponse())
+      // The build that just landed (`peek`, never `buildApiResponse`: a change counted during it would make this wait
+      // for — and start — another build at once, bypassing the scheduler's gap).
+      const [{ peekApiResponse }, { patchDataBuild }] = await Promise.all([import('./data'), import('./data-patch')])
+      const built = await peekApiResponse()
+      const patch = built ? patchDataBuild(built) : null
       if (patch) event = `event: data-patch\ndata: ${JSON.stringify(patch)}\n\nevent: change\ndata: ${JSON.stringify({ revision: patch.revision })}\n\n`
     } catch { /* A client can recover through its ordinary data GET. */ }
   }
@@ -87,6 +91,29 @@ const rebuilds = createRebuildScheduler({
   loadFactor: 4,
 })
 
+/**
+ * PERF.SERVIDOR-OCIOSO — the same rebuild when NOBODY is connected, paced at 30–60 s instead of 5–10 s. The first
+ * change after a quiet spell still builds at once (debounce only); a stream of writes then costs one build per 30 s
+ * or more. What reads the result in between is answered fresh anyway: `buildApiResponse` builds before answering
+ * while the data is dirty, and a client that connects triggers the normal rebuild (`onSseClientConnected`). The
+ * build is what writes the consolidate store the fleet, the board and the plan limits read, so it is paced, never
+ * stopped: those readers lag by at most one unwatched gap.
+ */
+const unwatchedRebuilds = createRebuildScheduler({
+  // A connected client may have built it meanwhile: a clean cache is not built again.
+  build: async () => { if (dataDirty()) await rebuildNow() },
+  onRebuilt: notifySseClients,
+  debounceMs: UNWATCHED_DEBOUNCE_MS,
+  minGapMs: UNWATCHED_MIN_GAP_MS,
+  maxGapMs: UNWATCHED_MAX_GAP_MS,
+  loadFactor: UNWATCHED_LOAD_FACTOR,
+})
+
+/** A client (an SSE stream) connected: a change no build has read yet is built now, at the watched pace. */
+export function onSseClientConnected(): void {
+  if (rebuildOnChange && dataDirty()) rebuilds.changed()
+}
+
 let rebuildOnChange = false
 let sseDebounce: ReturnType<typeof setTimeout> | null = null
 
@@ -113,7 +140,9 @@ export function notifyBookChange(): void { pushBook() }
 onBookWrite(() => notifyBookChange())
 
 export function triggerSseNotification() {
-  if (rebuildOnChange) rebuilds.changed()
+  const route = rebuildRoute({ rebuildOnChange, clients: sseClients.size })
+  if (route === 'watched') { noteDataChange(); rebuilds.changed() }
+  else if (route === 'unwatched') { markDataDirty(); unwatchedRebuilds.changed() }
   else {
     invalidateCache()
     if (sseDebounce) clearTimeout(sseDebounce)

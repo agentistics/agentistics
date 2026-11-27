@@ -16,7 +16,7 @@ import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
 import { recordRequestLatency } from './flows/perf-watch'
-import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, peekApiResponse, serializedData } from './data'
+import { buildApiResponse, buildApiResponseForClient, buildApiResponseWithin, cachedApiResponse, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, peekApiResponse, serializedData } from './data'
 import { readPreferences, writePreferences, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -140,6 +140,7 @@ import {
   SERVE_STATIC,
   triggerSseNotification,
   notifySseClients,
+  onSseClientConnected,
 } from './sse'
 import { fullSync } from './archive'
 import { getArchiveMode } from './preferences'
@@ -688,6 +689,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         start(controller) {
           sseClients.add(controller)
           controller.enqueue(sseEncoder.encode('event: connected\ndata: {}\n\n'))
+          // Somebody is looking again: a change no build has read yet is built now (PERF.SERVIDOR-OCIOSO).
+          onSseClientConnected()
           const ping = featureOn('adapter-chat') ? setInterval(() => {
             try { controller.enqueue(sseEncoder.encode('event: ping\ndata: {}\n\n')) }
             catch { clearInterval(ping); sseClients.delete(controller) }
@@ -4614,7 +4617,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // Sessions tab reflects opening/closing a session without a full data refetch.
     if (url.pathname === '/api/live-sessions' && req.method === 'GET') {
       try {
-        const data = await buildApiResponse()
+        // A poll every few seconds: the previous build is enough to match processes against (PERF.SERVIDOR-OCIOSO).
+        const data = await cachedApiResponse()
         // Reads /proc. On a profile that has revoked host power it is skipped entirely, and the
         // route still answers (with the reason).
         const snapshot = await readLocalLiveSnapshot(data.sessions)
@@ -4640,7 +4644,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // from `partial=1` so the web probe and older clients asking explicitly for slim cannot
         // accidentally receive the full 6+ MB response.
         const wantSlim = url.searchParams.get('slim') === '1'
-        const data = wantPartial ? await buildApiResponseForClient() : await buildApiResponse()
+        // The full read waits at most FULL_READ_WAIT_MS for the build that holds every change it could have seen; past
+        // that it answers the previous build with `stale: true` (QA R5: an agent must not sit a minute on a slow build).
+        const bounded = wantPartial ? null : await buildApiResponseWithin()
+        const data = bounded ? bounded.data : await buildApiResponseForClient()
+        const staleFields = bounded?.stale ? { stale: true, ...(bounded.builtAt ? { staleBuiltAt: new Date(bounded.builtAt).toISOString() } : {}) } : {}
         const unscoped = data
         // Live open-session detection — computed per request (not part of the cached build)
         // so it reflects `claude` processes in real time.
@@ -4648,7 +4656,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { liveSessionIds, liveProcesses } = local
         const liveUnavailable = local.liveUnavailable
         // The build is serialized once (`serializedData`); only the live fields are added per request.
-        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}) }
+        const live = { liveSessionIds, liveProcesses, ...(liveUnavailable ? { liveUnavailable } : {}), ...staleFields }
         if (data.sessions) {
           // ONE encoding of this build for every client (data-response-cache.ts): a validator the
           // client can revalidate with, a 304 when its copy is current, and the same bytes otherwise.

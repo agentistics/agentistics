@@ -107,7 +107,7 @@ export async function liveConversationHolders(
     readRegistry().catch(() => [] as ManagedSession[]),
     backend.list(),
     loadHarnessSessions().catch(() => emptyHarnessSessionIndex()),
-    scanProcesses().then(r => r.procs).catch(() => []),
+    scanProcesses('claims').then(r => r.procs).catch(() => []),
   ])
   const alive = new Set(backendSessions.filter(b => b.alive).map(b => b.id))
 

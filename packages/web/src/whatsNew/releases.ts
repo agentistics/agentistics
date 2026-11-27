@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O agentistics gasta menos processador quando você não está com o painel aberto: ele não recalcula mais todos os dados a cada poucos segundos enquanto suas sessões trabalham. Quando você (ou um agente) pede os dados, ele espera até 5 segundos pelo cálculo com as últimas mudanças; se demorar mais, responde com o cálculo anterior e avisa que ele está desatualizado.',
+        en: 'agentistics uses less CPU when the dashboard is not open: it no longer recalculates all of its data every few seconds while your sessions work. When you (or an agent) ask for the data, it waits up to 5 seconds for a calculation that includes the latest changes; if that takes longer, it answers with the previous one and says it is out of date.',
+      },
+      {
+        pt: 'No Mac, a procura por sessões abertas faz muito menos chamadas ao sistema: ela não examina mais, a cada poucos segundos, todos os programas Node e Electron do computador (VS Code, extensões) que não são assistentes, e uma procura lenta não é repetida logo em seguida.',
+        en: 'On a Mac, looking for open sessions makes far fewer system calls: it no longer inspects, every few seconds, every Node and Electron program on the computer (VS Code, extensions) that is not an assistant, and a slow search is not repeated right away.',
+      },
+      {
+        pt: 'Quando o serviço do OpenCode não responde, o agentistics espera cada vez mais antes de tentar de novo (até 5 minutos) em vez de tentar a cada poucos segundos, e volta a tentar na hora quando o serviço reinicia.',
+        en: 'When the OpenCode service does not answer, agentistics waits longer and longer before trying again (up to 5 minutes) instead of every few seconds, and tries again at once when the service restarts.',
+      },
+      {
+        pt: 'A fila de tarefas sem vaga não refaz a mesma verificação nem repete o mesmo aviso a cada minuto; uma peça sai da fila assim que uma sessão termina, a memória é liberada ou o limite do plano volta a ter folga.',
+        en: 'The task queue with no free slot no longer repeats the same check and the same message every minute; a queued piece moves on as soon as a session ends, memory is freed or the plan limit has room again.',
+      },
+      {
+        pt: 'A fila de entregas lê o quadro de tarefas uma vez por mudança, em vez de recarregá-lo inteiro para cada peça a cada minuto.',
+        en: 'The delivery queue reads the task board once per change instead of reloading all of it for every queued piece every minute.',
+      },
+    ],
+  },
   '2.230.0': {
     features: [
       {
