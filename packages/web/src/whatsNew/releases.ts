@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Navegador interno: a página aparece nítida em telas de alta densidade. Antes a imagem era capturada em tamanho menor e esticada, o que deixava texto e imagens borrados.',
+        en: 'Built-in browser: the page now looks sharp on high-density screens. The picture used to be captured smaller and stretched, which blurred text and images.',
+      },
+      {
+        pt: 'Navegador interno: enquanto a página se mexe as imagens chegam leves e fluidas; quando ela para, uma imagem de alta qualidade substitui a última em menos de meio segundo.',
+        en: 'Built-in browser: while the page moves, frames stay light and smooth; once it stops, a high-quality picture replaces the last one in under half a second.',
+      },
+    ],
+  },
   '2.229.6': {
     features: [],
     fixes: [

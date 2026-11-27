@@ -37,8 +37,19 @@ export const STALE_KICK_DELAY_MS = 120
 export const MAX_STALE_KICKS = 5
 /** Once the fast retries are exhausted, keep recovering a still page at a bounded, slower cadence. */
 export const STALE_BACKOFF_MS = 5_000
-/** `Page.startScreencast` parameters (spec §1.5). */
-export const SCREENCAST_PARAMS = { format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 } as const
+/**
+ * JPEG quality of the MOVING picture (NAVEGADOR.FLUIDEZ-NITIDEZ). Measured on the real page set
+ * (leader/qa/navegador-fluidez.md): bytes per frame grow steeply past this point while motion hides the difference.
+ */
+export const QUALITY_MOTION = 70
+/** Quality of the ONE sharp frame taken once the page is still (a screenshot, not a screencast frame). */
+export const QUALITY_STILL = 90
+/** No new frame for this long = the page is still: replace the last motion frame with a sharp one. */
+export const STILL_MS = 350
+/** At most one sharp frame per this interval (a blinking caret must not become a screenshot loop). */
+export const SHARP_MIN_INTERVAL_MS = 1_500
+/** `Page.startScreencast` parameters (spec §1.5); `maxWidth`/`maxHeight` are replaced by the viewer's plan. */
+export const SCREENCAST_PARAMS = { format: 'jpeg', quality: QUALITY_MOTION, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 } as const
 
 /** One `Page.screencastFrame` as CDP sends it. */
 export interface RawCastFrame {
@@ -61,6 +72,8 @@ export interface CastFrame {
   title: string
   /** Server clock at delivery (ms). */
   at: number
+  /** The sharp still frame (a screenshot at `QUALITY_STILL`) that replaced the last motion frame. */
+  sharp?: true
 }
 
 export interface CastTab { id: string; title: string; active: boolean }
@@ -96,6 +109,8 @@ export type StartCast =
     ok: true; ack(sessionId: number): void; stop(): Promise<void>; resize?(v: ViewerViewport): Promise<void>
     /** The page viewport (CSS px) the cast has applied right now, when it sized one. */
     viewport?(): { w: number; h: number } | null
+    /** A sharp picture of the page as it is now (base64 JPEG), or null. Absent = no sharp-when-still. */
+    sharp?(): Promise<string | null>
   }
   | { ok: false; reason: string }
 
@@ -153,6 +168,13 @@ interface Loop {
   /** Stale-size frames dropped since the last good one (the re-ask budget). */
   kicks: number
   kickTimer: Timer | null
+  /** Armed after a motion frame is delivered; fires the sharp still frame. */
+  stillTimer: Timer | null
+  /** Bumped by every raw frame: a screenshot taken while it moved again is discarded. */
+  motion: number
+  lastSharpAt: number
+  /** The data of the last delivered screencast frame (an identical one is acked, never re-sent). */
+  lastRawData: string | null
   ended: boolean
 }
 
@@ -181,9 +203,9 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     if (loop.ended) return
     loop.ended = true
     loops.delete(id(loop.key, loop.tab))
-    for (const t of [loop.flushTimer, loop.ackTimer, loop.kickTimer]) if (t !== null) d.clearTimeout(t)
+    for (const t of [loop.flushTimer, loop.ackTimer, loop.kickTimer, loop.stillTimer]) if (t !== null) d.clearTimeout(t)
     if (loop.stateTimer !== null) d.clearInterval(loop.stateTimer)
-    loop.flushTimer = loop.ackTimer = loop.stateTimer = loop.kickTimer = null
+    loop.flushTimer = loop.ackTimer = loop.stateTimer = loop.kickTimer = loop.stillTimer = null
     const cast = loop.cast
     loop.cast = null
     for (const r of [...loop.readers]) {
@@ -255,6 +277,9 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     }
     loop.kicks = 0
     if (loop.kickTimer !== null) { d.clearTimeout(loop.kickTimer); loop.kickTimer = null }
+    // The same picture again (a repaint that changed no pixel, or the one a screenshot provoked): ack, never re-send.
+    if (raw.data === loop.lastRawData && loop.lastFrame) { tryAck(loop); return }
+    loop.lastRawData = raw.data
     if (w > 0 && h > 0) loop.viewport = { w, h }
     loop.seq += 1
     const frame: CastFrame = { tab: loop.tab, seq: loop.seq, epoch: loop.epoch, w, h, jpeg: raw.data, url: st?.url ?? '', title: st?.title ?? '', at: d.now() }
@@ -262,6 +287,35 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     loop.lastDeliveryAt = d.now()
     for (const r of [...loop.readers]) give(r, frame)
     tryAck(loop)
+    armStill(loop)
+  }
+
+  /**
+   * Sharp when still: motion frames are encoded at `QUALITY_MOTION`; once nothing new arrived for `STILL_MS`, one
+   * screenshot at `QUALITY_STILL` replaces the last motion frame. Discarded if the page moved meanwhile, if the
+   * viewport changed (epoch), or if it cannot be told to be of the page's current size.
+   */
+  function armStill(loop: Loop): void {
+    if (loop.stillTimer !== null) d.clearTimeout(loop.stillTimer)
+    loop.stillTimer = null
+    if (!loop.cast?.sharp) return
+    const wait = Math.max(STILL_MS, loop.lastSharpAt + SHARP_MIN_INTERVAL_MS - d.now())
+    loop.stillTimer = d.setTimeout(() => { loop.stillTimer = null; void takeSharp(loop) }, wait)
+  }
+
+  async function takeSharp(loop: Loop): Promise<void> {
+    const base = loop.lastFrame
+    if (loop.ended || !loop.cast?.sharp || !base || base.sharp) return
+    const motion = loop.motion
+    loop.lastSharpAt = d.now()
+    let jpeg: string | null = null
+    try { jpeg = await loop.cast.sharp() } catch { jpeg = null }
+    if (!jpeg || loop.ended || loop.motion !== motion || loop.lastFrame !== base || loop.epoch !== base.epoch) return
+    if (isStaleFrame({ jpeg: jpegDims(jpeg), meta: { w: base.w, h: base.h }, expected: loop.cast?.viewport?.() ?? null })) return
+    loop.seq += 1
+    const frame: CastFrame = { ...base, seq: loop.seq, jpeg, at: d.now(), sharp: true }
+    loop.lastFrame = frame
+    for (const r of [...loop.readers]) give(r, frame)
   }
 
   /** The newest sized viewer: the one that owns the page's viewport. */
@@ -279,6 +333,8 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
     loop.epoch = ++epochClock
     loop.lastFrame = null
     loop.latest = null
+    loop.lastRawData = null
+    if (loop.stillTimer !== null) { d.clearTimeout(loop.stillTimer); loop.stillTimer = null }
     for (const r of loop.readers) r.pending = null
     await loop.cast.resize(size)
   }
@@ -298,6 +354,8 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
   function onRaw(loop: Loop, raw: RawCastFrame): void {
     if (loop.ended || loop.readers.size === 0) return
     if (typeof raw?.data !== 'string' || typeof raw.sessionId !== 'number') return
+    loop.motion += 1
+    if (loop.stillTimer !== null) { d.clearTimeout(loop.stillTimer); loop.stillTimer = null }
     if (loop.unacked.length === 0) loop.oldestUnackedAt = d.now()
     loop.unacked.push(raw.sessionId)
     loop.latest = raw
@@ -353,7 +411,8 @@ export function createScreencastHub(d: ScreencastDeps): ScreencastHub {
         const created: Loop = {
           key, tab, readers: new Set(), cast: null, starting: null, latest: null, unacked: [], oldestUnackedAt: 0,
           lastDeliveryAt: -Infinity, lastAckAt: -Infinity, flushTimer: null, ackTimer: null, stateTimer: null, stateDigest: '', lastFrame: null,
-          lastState: null, viewport: null, seq: 0, epoch: ++epochClock, kicks: 0, kickTimer: null, ended: false,
+          lastState: null, viewport: null, seq: 0, epoch: ++epochClock, kicks: 0, kickTimer: null,
+          stillTimer: null, motion: 0, lastSharpAt: -Infinity, lastRawData: null, ended: false,
         }
         loop = created
         loops.set(id(key, tab), created)
