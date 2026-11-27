@@ -17,7 +17,7 @@
  */
 import type { HarnessId } from './types'
 import type { BillingSettings } from './billing'
-import { accountTimeline, dayFromMs } from './billing'
+import { accountTimeline, localDayFromMs } from './billing'
 import { findPlan } from './plan-catalog'
 
 export type PlanWindowKind = '5h' | 'week'
@@ -404,7 +404,8 @@ export function registeredPlanLabel(
   nowMs: number,
   accountId?: string,
 ): string | undefined {
-  const today = dayFromMs(nowMs)
+  // Billing periods are calendar days the person typed, so "today" is the local one.
+  const today = localDayFromMs(nowMs)
   const periods = accountTimeline(billing, harness, accountId)?.periods
   if (!today || !periods) return undefined
   const p = periods.find(x => x.from <= today && (!x.to || x.to >= today))

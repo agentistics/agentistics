@@ -27,7 +27,7 @@ import {
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { blendedCostPerToken, computeDerivedStats, useData, useDerivedStats } from './hooks/useData'
 import { subscribeEvent } from './lib/eventStream'
-import { usePlanBasis } from './hooks/usePlanBasis'
+import { currentMonthCommitment, usePlanBasis } from './hooks/usePlanBasis'
 import { useBillingAccounts } from './hooks/useBillingAccounts'
 import { createBillingSaver } from './lib/billingSaver'
 import { billingNotices } from './lib/billingNotices'
@@ -47,7 +47,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { costCellText, totalTokens as sumAllTokens, isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctHarnesses, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
+import { costCellText, totalTokens as sumAllTokens, isAdapterHarness, billingReadiness, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctHarnesses, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
 import { ActivityHeatmap } from './components/ActivityHeatmap'
@@ -2400,13 +2400,12 @@ export default function AppLayout() {
   // What the registered plans commit to THIS calendar month — a different question from the
   // filter-window plan cost, and the one a monthly budget is set against.
   const monthCommitment = useMemo(
-    () => (monthlyCommitment({
+    () => currentMonthCommitment({
       profiles: billing.profiles,
-      month: new Date().toISOString().slice(0, 10),
       brlRate,
       accounts: billingAccounts,
       accountProfiles: billing.accountProfiles,
-    })),
+    }),
     [billing.profiles, billing.accountProfiles, billingAccounts, brlRate],
   )
 

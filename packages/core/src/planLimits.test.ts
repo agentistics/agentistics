@@ -474,6 +474,22 @@ test('registered plan label resolves per account, falling back to the harness de
   expect(registeredPlanLabel(billing, 'claude', now)).toBe('Pro')
 })
 
+test('the plan label changes on the LOCAL day the new plan starts', () => {
+  const p = (id: string, from: string, to?: string) => ({ id, mode: 'subscription' as const, planId: 'other', label: id, price: { amount: 1, currency: 'USD' as const }, from, ...(to ? { to } : {}) })
+  const billing = { profiles: { claude: { periods: [p('Pro', '2026-01-01', '2026-11-14'), p('Max 20x', '2026-11-15')] } } }
+  const previous = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  try {
+    // 14/11 22:00 in Brazil — already the 15th in UTC.
+    process.env.TZ = 'America/Sao_Paulo'
+    expect(registeredPlanLabel(billing, 'claude', Date.parse('2026-11-15T01:00:00Z'))).toBe('Pro')
+    // 15/11 05:00 in Japan — still the 14th in UTC.
+    process.env.TZ = 'Asia/Tokyo'
+    expect(registeredPlanLabel(billing, 'claude', Date.parse('2026-11-14T20:00:00Z'))).toBe('Max 20x')
+  } finally {
+    process.env.TZ = previous
+  }
+})
+
 describe('yieldStaleRows', () => {
   const row = (account: string, stale: boolean) =>
     ({ harness: 'claude', plan: 'Claude Max 5x', account, stale, status: 'ok', freeSlots: 3, suggestedParallel: 3 }) as unknown as AccountBudget
