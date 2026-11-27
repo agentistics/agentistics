@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Um aviso entre sessões (por exemplo, "o líder mudou") agora aparece no chat como "Aviso", e não mais como "Tarefa entregue". Ele não marca nenhuma tarefa como entregue e diz à sessão que não precisa responder.',
+        en: 'A notice between sessions (for example, "the leader changed") now shows in the chat as "Notice", no longer as "Task handed back". It marks no task as delivered and tells the session no reply is needed.',
+      },
+    ],
+  },
   '2.230.6': {
     features: [],
     fixes: [
