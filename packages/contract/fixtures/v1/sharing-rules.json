@@ -1,0 +1,47 @@
+{
+  "contract": "1.0.0",
+  "description": "Per-repository sharing rules: a machine that never sent rules shares everything; an allowlist deletes what it excludes at once and later pushes of excluded sessions are `not_shared` (durable: the cursor advances).",
+  "steps": [
+    {
+      "operation": "getSharing",
+      "expect": { "status": 200, "subset": { "mode": "denylist", "sources": [] } }
+    },
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [
+          { "session_id": "s-api", "harness": "claude-code", "seq": 1, "project_path": "/w/api", "git_remote": "git@github.com:acme/api.git", "start_time": "2026-10-02T09:00:00Z" },
+          { "session_id": "s-web", "harness": "claude-code", "seq": 1, "project_path": "/w/web", "git_remote": "https://github.com/acme/web", "start_time": "2026-10-02T09:00:00Z" }
+        ]
+      },
+      "expect": { "status": 200, "subset": { "results": [{ "status": "applied" }, { "status": "applied" }] } }
+    },
+    {
+      "operation": "setSharing",
+      "body": { "mode": "allowlist", "sources": [{ "type": "repo", "value": "https://github.com/Acme/API.git" }] },
+      "expect": { "status": 200, "subset": { "mode": "allowlist", "sources": [{ "type": "repo", "value": "https://github.com/Acme/API.git" }], "removed": 1 } }
+    },
+    {
+      "operation": "getSharing",
+      "expect": { "status": 200, "subset": { "mode": "allowlist", "sources": [{ "type": "repo", "value": "https://github.com/Acme/API.git" }] } }
+    },
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [
+          { "session_id": "s-web", "harness": "claude-code", "seq": 2, "project_path": "/w/web", "git_remote": "https://github.com/acme/web", "start_time": "2026-10-02T09:00:00Z" }
+        ]
+      },
+      "expect": { "status": 200, "subset": { "results": [{ "session_id": "s-web", "status": "not_shared" }] } }
+    },
+    {
+      "operation": "setSharing",
+      "body": { "mode": "everything" , "sources": [] },
+      "expect": { "status": 400, "subset": { "error": "invalid_rules" } }
+    }
+  ]
+}

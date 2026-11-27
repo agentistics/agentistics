@@ -1,0 +1,132 @@
+{
+  "contract": "1.0.0",
+  "description": "Every T0/T1/T2 field the v1 schema declares, as agentop projects them from SessionMeta. Re-pushing the same seq is `unchanged`; a lower seq is `stale`.",
+  "steps": [
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00.000Z",
+        "operational": {
+          "agent_version": "2.35.1",
+          "platform": "linux",
+          "arch": "x64",
+          "counts": { "sessions_live": 3, "harnesses": 2 },
+          "samples": [
+            {
+              "minute": "2026-10-02T11:59:00Z",
+              "cpu": { "min": 3, "avg": 11.5, "max": 40 },
+              "ram": { "min": 41, "avg": 42, "max": 44 },
+              "gpu": { "min": 0, "avg": 0, "max": 0 },
+              "vram": { "min": 0, "avg": 0, "max": 0 },
+              "disk": { "min": 70, "avg": 70, "max": 70 },
+              "net_rx": { "min": 0, "avg": 1200, "max": 9000 },
+              "net_tx": { "min": 0, "avg": 300, "max": 2000 }
+            }
+          ]
+        },
+        "sessions": [
+          {
+            "session_id": "0f6c2b1e-1d2a-4b8e-9a51-6a0c8d1e2f30",
+            "harness": "claude-code",
+            "seq": 42,
+            "project_path": "/home/dev/acme-api",
+            "git_remote": "git@github.com:acme/api.git",
+            "model": "claude-opus-5-5",
+            "start_time": "2026-10-02T10:00:00Z",
+            "end_time": "2026-10-02T11:30:00+00:00",
+            "duration_minutes": 90,
+            "active_minutes": 61.5,
+            "user_message_count": 12,
+            "assistant_message_count": 30,
+            "user_chars": 4200,
+            "user_char_messages": 12,
+            "assistant_chars": 51000,
+            "assistant_char_messages": 30,
+            "input_tokens": 120000,
+            "output_tokens": 18000,
+            "cache_read_input_tokens": 900000,
+            "cache_creation_input_tokens": 40000,
+            "cache_creation_1h_input_tokens": 0,
+            "cache_creation_5m_input_tokens": 40000,
+            "context_tokens": 88000,
+            "context_window": 200000,
+            "compact_count": 1,
+            "compact_ms": 5400,
+            "compact_dropped_tokens": 60000,
+            "cost_usd": 4.27,
+            "tool_counts": { "Read": 40, "Edit": 12, "Bash": 9 },
+            "tool_output_tokens": { "Read": 52000, "Bash": 3100 },
+            "tool_errors": 2,
+            "tool_error_categories": { "exit_code": 2 },
+            "skill_uses": { "superpowers:brainstorming": 1 },
+            "mcp_tool_call_count": 3,
+            "mcp_tool_names": ["mcp__serena__find_symbol"],
+            "languages": ["TypeScript", "YAML"],
+            "git_commits": 2,
+            "git_pushes": 0,
+            "lines_added": 310,
+            "lines_removed": 42,
+            "files_modified": 7,
+            "user_interruptions": 1,
+            "user_response_times": [12.5, 40, 3],
+            "message_hours": [10, 10, 11],
+            "user_message_timestamps": ["2026-10-02T10:00:05Z", "2026-10-02T10:20:00Z"],
+            "uses_task_agent": true,
+            "uses_mcp": true,
+            "uses_web_search": false,
+            "uses_web_fetch": false,
+            "daily": { "2026-10-02": { "input_tokens": 120000, "hours": { "10": 3, "11": 9 } } },
+            "model_usage": { "claude-opus-5-5": { "input_tokens": 120000, "output_tokens": 18000, "cost_usd": 4.27 } },
+            "title": "Contract tests for the machine API",
+            "first_prompt": "Design the versioned contract",
+            "user_label": "contract",
+            "user_note": "pairs with the public patch"
+          },
+          {
+            "session_id": "codex-7781",
+            "harness": "codex",
+            "seq": 3,
+            "project_path": "/home/dev/scratch",
+            "start_time": "2026-10-02T09:00:00Z",
+            "git_remote": null,
+            "title": null
+          }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "results": [
+            { "session_id": "0f6c2b1e-1d2a-4b8e-9a51-6a0c8d1e2f30", "harness": "claude-code", "seq": 42, "status": "applied" },
+            { "session_id": "codex-7781", "harness": "codex", "seq": 3, "status": "applied" }
+          ],
+          "t0": "full",
+          "titles": "kept",
+          "redacted": 0,
+          "droppedFields": 0
+        }
+      }
+    },
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [
+          { "session_id": "codex-7781", "harness": "codex", "seq": 3, "project_path": "/home/dev/scratch", "start_time": "2026-10-02T09:00:00Z" },
+          { "session_id": "codex-7781", "harness": "codex", "seq": 2, "project_path": "/home/dev/scratch", "start_time": "2026-10-02T09:00:00Z" }
+        ]
+      },
+      "expect": {
+        "status": 200,
+        "subset": {
+          "results": [
+            { "session_id": "codex-7781", "harness": "codex", "seq": 3, "status": "unchanged" },
+            { "session_id": "codex-7781", "harness": "codex", "seq": 2, "status": "stale" }
+          ]
+        }
+      }
+    }
+  ]
+}

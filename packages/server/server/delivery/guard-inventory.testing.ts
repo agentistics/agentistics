@@ -39,8 +39,12 @@ export interface ReachInventory { base: string; writers: Record<string, string[]
  * fsync dir) became the ONE primitive for non-regenerable state; 13 modules dropped their own writeFile+rename for it,
  * so the repo-wide raw-writer count shrinks. Its own sites (and `sessions/native-notes.ts` as a new importer) are the
  * only entries added; the ceiling stays shrink-only from here.
+ *
+ * CLOUD PAIRING admission (PV.4b, Cloud leader decision on t-6d064ff725, Motor leader to review at commit): 7 reach entries
+ * for the two new sealed files (`cloud-identity.sealed`, `cloud-credential.sealed`) — their `secret` rows in the backup
+ * plan, the vault's restore hints and sealed-file list, and the store in `vault/ops.ts`. Nothing else was added.
  */
-export const R3_INVENTORY_DIGEST = 'cec4861f79f0d0d467a5dcbadf68c1c07628a5d76e378e80baeb363355e3a8ba'
+export const R3_INVENTORY_DIGEST = '2ef21efd9dcdaaebb6e1b02c91bc6d5efce720c652ad98422f4cce99eb2800a0'
 export function r3Inventory(): ReachInventory {
   const text = readFileSync(join(import.meta.dir, 'guard-inventory-r3.fixture.json'), 'utf8')
   if (digest(text) !== R3_INVENTORY_DIGEST) throw new Error('Historical guard inventory changed: the S2a r3 ceiling is pinned; a writer or a book reference may disappear, never be added')

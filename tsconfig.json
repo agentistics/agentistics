@@ -28,6 +28,7 @@
 
     // Workspace package resolution
     "paths": {
+      "@agentistics/contract": ["./packages/contract/src/index.ts"],
       "@agentistics/core": ["./packages/core/src/index.ts"],
       "@agentistics/engine-api": ["./packages/engine-api/src/index.ts"],
       "@agentistics/vault": ["./packages/vault/src/index.ts"]
@@ -44,6 +45,7 @@
     "packages/tui/src",
     "packages/tui/scripts",
     "packages/vscode/src",
-    "packages/mcp"
+    "packages/mcp",
+    "packages/contract/src"
   ]
 }

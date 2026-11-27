@@ -1,0 +1,1112 @@
+# Agentistics machine contract — HTTP, v1 (E9/E15).
+#
+# The ONLY surface a public build (agentop, the desktop app) speaks to Agentistics Cloud over HTTP:
+# pairing (RFC 8628 device grant), key-bound tokens (RFC 9449 DPoP), the machine's own record,
+# metrics ingest and the encrypted backup (1.1). Browser routes (sign-in, the pairing approval screen, consent switches, API
+# tokens) are the Cloud's own product surface and are NOT part of this contract.
+#
+# This file describes what services/cloud serves TODAY, byte for byte. It is pinned by
+# services/cloud/test/contract/wire-v1.test.ts: every machine route and both OAuth routes must be
+# here and nothing else; every response the real app sends in the golden flows must validate
+# against the schemas below (response objects are closed: a new field is a spec change first); the
+# constants in `x-agentistics-constants` must equal the ones in src/.
+#
+# Versioning rules: docs/specs/contract/01-versioning.md. Schema keywords used are a deliberate
+# subset of JSON Schema 2020-12 (type, enum, const, pattern, min/maxLength, minimum, maximum,
+# maxItems, maxProperties, propertyNames, properties, required, additionalProperties, items,
+# oneOf, $ref, plus `x-null-means-absent`: a key whose value is null is treated as not sent) so the public package can validate fixtures with a 100-line checker and no deps.
+
+openapi: 3.1.0
+info:
+  title: Agentistics machine contract
+  version: 1.1.0
+  description: |
+    Machine ↔ Agentistics Cloud. All paths are relative to the Cloud's public URL (the `cloudUrl`
+    the machine was paired against). A DPoP proof's `htu` is that public URL plus the path, without
+    query or fragment.
+
+    Tolerant reader: a client MUST ignore response fields it does not know and MUST treat an
+    unknown `error` code by its HTTP status class. The Cloud drops unknown fields in a metrics push
+    (and counts them in `droppedFields`) instead of refusing them, except names that mean content.
+  license:
+    name: Same licence as the public agentistics repository
+x-agentistics-constants:
+  contractVersion: 1.1.0
+  clientId: agentop
+  deviceCodeGrant: urn:ietf:params:oauth:grant-type:device_code
+  dpop:
+    header: DPoP
+    typ: dpop+jwt
+    alg: EdDSA
+    crv: Ed25519
+    proofSkewS: 60
+    maxProofBytes: 2048
+    jtiPattern: ^[A-Za-z0-9_-]{16,64}$
+  deviceCodeExpiresInS: 600
+  pollIntervalS: 5
+  slowDownIncrementS: 5
+  accessTokenExpiresInS: 900
+  refreshIdleDays: 90
+  userCodeAlphabet: BCDFGHJKLMNPQRSTVWXZ
+  maxFormBytes: 4096
+  machineKinds: [device, server, onprem]
+  flowNames: [metrics, sessionTitles, sessionSync, remoteAccess, backup]
+  defaultFlows: { metrics: true, sessionTitles: true, sessionSync: true, remoteAccess: true, backup: true }
+  backup:
+    maxChunks: 6000
+    chunkBytes: 4194304
+    tagBytes: 16
+    maxPartBytes: 4194320
+    maxWrapBytes: 4096
+    maxSenders: 100
+    maxBodyBytes: 8192
+    maxCommitBodyBytes: 1048576
+    urlExpiresInS: 900
+    pendingUploadExpiresInH: 6
+    purgeWithinDays: 30
+    manifestPart: manifest
+    snapshotIdPattern: ^[A-Za-z0-9_-]{16,64}$
+  metrics:
+    bodyVersion: 1
+    maxBodyBytes: 2097152
+    maxDecodedBytes: 8388608
+    maxRulesBytes: 262144
+    maxBatch: 50
+    minPushIntervalS: 60
+    clockSkewFlagMs: 300000
+    maxSamples: 120
+    maxText: 1024
+    maxLabel: 500
+    maxSources: 1000
+    sampleMetrics: [cpu, ram, gpu, vram, disk, net_rx, net_tx]
+    t2Fields: [title, first_prompt, user_label, user_note]
+    sessionStatuses: [applied, unchanged, stale, not_shared]
+    # A key with one of these names on the body, a session or `operational` refuses the whole
+    # request with 422 content_not_accepted (T3 never enters the Cloud through ingest).
+    contentFields:
+      [content, contents, message, messages, transcript, prompt, prompts, response, responses, completion, code, output, outputs,
+       tool_input, tool_inputs, tool_result, tool_results, diff, patch, attachments, events, journal, agentMetrics]
+
+servers:
+  - url: https://cloud.agentistics.dev
+    description: Placeholder; the machine uses the URL it was paired against.
+
+components:
+  securitySchemes:
+    dpop:
+      type: http
+      scheme: DPoP
+      description: |
+        `Authorization: DPoP <access_token>` AND a `DPoP` header holding a fresh proof for THIS
+        request, signed by the machine's Ed25519 key, whose `ath` is base64url(sha256(access_token)).
+        A bearer token alone is refused. 401 answers carry
+        `WWW-Authenticate: DPoP error="<code>", algs="EdDSA"`.
+
+  parameters:
+    DPoPProof:
+      name: DPoP
+      in: header
+      required: true
+      description: |
+        Compact JWS, ≤ 2048 bytes. Header `{"typ":"dpop+jwt","alg":"EdDSA","jwk":{"kty":"OKP","crv":"Ed25519","x":…}}`
+        (no `d`). Payload `{"jti","htm","htu","iat"[,"ath"]}`: `jti` matches the pattern below and is
+        never reused (the Cloud remembers it for 2 × skew), `htm` the upper-case method, `htu` the
+        public URL + path, `iat` integer seconds within ±60 s of the Cloud clock, `ath` only on API
+        requests. The machine is identified by the RFC 7638 thumbprint of `jwk` (`jkt`).
+      schema: { type: string, maxLength: 2048, pattern: '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' }
+
+  headers:
+    WWWAuthenticate:
+      schema: { type: string, pattern: '^DPoP error="(invalid_token|invalid_dpop_proof)", algs="EdDSA"$' }
+    RetryAfter:
+      schema: { type: string, pattern: '^[0-9]+$' }
+    RequestId:
+      description: Echoes a well-formed incoming `x-request-id`, or a fresh one.
+      schema: { type: string }
+
+  schemas:
+    # ── shared ────────────────────────────────────────────────────────────────────────────
+    Iso:
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$'
+    IsoOut:
+      description: What the Cloud emits (Date#toISOString).
+      type: string
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+    Opaque:
+      description: An opaque token (32 random bytes, base64url). Only its sha256 is stored.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{16,128}$'
+    Uuid:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    Fingerprint:
+      description: First 16 bytes of sha256(SPKI DER), 8 groups of 4 hex characters (the envelope-crypto.ts rule).
+      type: string
+      pattern: '^[0-9a-f]{4}( [0-9a-f]{4}){7}$'
+    MachineKind:
+      type: string
+      enum: [device, server, onprem]
+    Flows:
+      description: The C15 switches chosen at pairing (and changed later by the owner in the browser).
+      type: object
+      required: [metrics, sessionTitles, sessionSync, remoteAccess, backup]
+      additionalProperties: false
+      properties:
+        metrics: { type: boolean }
+        sessionTitles: { type: boolean }
+        sessionSync: { type: boolean }
+        remoteAccess: { type: boolean }
+        backup: { type: boolean, description: 'Encrypted backup to the Cloud (1.1). Off on machines paired before it existed.' }
+
+    # ── errors ────────────────────────────────────────────────────────────────────────────
+    OAuthError:
+      description: RFC 6749 §5.2 shape, used by /oauth/* only.
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          enum: [invalid_request, invalid_client, invalid_grant, invalid_dpop_proof, unsupported_grant_type,
+                 authorization_pending, slow_down, expired_token, access_denied]
+    RateLimited:
+      type: object
+      required: [error, retryAfterSec]
+      additionalProperties: false
+      properties:
+        error: { const: rate_limited }
+        retryAfterSec: { type: integer, minimum: 1 }
+    MachineAuthError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string, enum: [invalid_token, invalid_dpop_proof] }
+    Error:
+      description: Every other non-2xx answer. `error` is an open set; the extra fields appear only with the codes named.
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string, pattern: '^[a-z_]+$' }
+        field: { type: string, description: 'invalid_body / invalid_session / content_not_accepted: the offending key' }
+        index: { type: integer, minimum: 0, description: 'invalid_session / content_not_accepted: the session index' }
+        maxBatch: { type: integer, minimum: 1, description: batch_too_large }
+        flow: { type: string, description: flow_disabled }
+        reason: { type: string, description: 'flow_disabled: a sentence to show the person' }
+        requestId: { type: string, description: internal }
+        missing: { type: array, items: { type: string }, description: 'missing_parts: parts not uploaded (the first 100)' }
+        quotaBytes: { type: integer, minimum: 0, description: quota_exceeded }
+        usedBytes: { type: integer, minimum: 0, description: quota_exceeded }
+        fingerprint: { $ref: '#/components/schemas/Fingerprint', description: 'already_set: the key the person already has' }
+        wrapVersion: { type: integer, minimum: 1, description: 'already_set / wrap_moved: the current version' }
+
+    # ── pairing ───────────────────────────────────────────────────────────────────────────
+    DeviceAuthorizationForm:
+      type: object
+      required: [client_id, envelope_key, name]
+      additionalProperties: true
+      properties:
+        client_id: { const: agentop }
+        envelope_key:
+          description: The machine's X25519 envelope public key, standard base64 SPKI DER (the envelope-crypto.ts format). Canonical base64 only.
+          type: string
+          maxLength: 256
+          pattern: '^[A-Za-z0-9+/]+={0,2}$'
+        name:
+          description: Trimmed; 1–80 characters, no control characters.
+          type: string
+          minLength: 1
+          maxLength: 80
+        kind:
+          description: Defaults to `device`. `agentistics-runner` is never enrolled through this grant.
+          $ref: '#/components/schemas/MachineKind'
+    DeviceAuthorization:
+      type: object
+      required: [device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval]
+      additionalProperties: false
+      properties:
+        device_code: { $ref: '#/components/schemas/Opaque' }
+        user_code:
+          description: Shown to the person. Typed back in any case, with or without the dash.
+          type: string
+          pattern: '^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$'
+        verification_uri: { type: string, pattern: '^https?://.+/pair$' }
+        verification_uri_complete: { type: string, pattern: '^https?://.+/pair\?code=[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$' }
+        expires_in: { const: 600 }
+        interval: { const: 5 }
+    DeviceCodeTokenForm:
+      type: object
+      required: [client_id, grant_type, device_code]
+      additionalProperties: true
+      properties:
+        client_id: { const: agentop }
+        grant_type: { const: 'urn:ietf:params:oauth:grant-type:device_code' }
+        device_code: { type: string, maxLength: 128 }
+    RefreshTokenForm:
+      type: object
+      required: [client_id, grant_type, refresh_token]
+      additionalProperties: true
+      properties:
+        client_id: { const: agentop }
+        grant_type: { const: refresh_token }
+        refresh_token: { type: string, maxLength: 128 }
+    PairedToken:
+      description: |
+        Answer to the device-code grant. The refresh token is bound to the machine key (`jkt`) and is
+        NOT rotated: every use carries a fresh proof. It dies on revocation, on 90 days without a
+        refresh, or when the member who approved the pairing leaves the workspace.
+      type: object
+      required: [access_token, token_type, expires_in, refresh_token, machine_id, workspace_id, flows]
+      additionalProperties: false
+      properties:
+        access_token: { $ref: '#/components/schemas/Opaque' }
+        token_type: { const: DPoP }
+        expires_in: { const: 900 }
+        refresh_token: { $ref: '#/components/schemas/Opaque' }
+        machine_id: { $ref: '#/components/schemas/Uuid' }
+        workspace_id: { $ref: '#/components/schemas/Uuid' }
+        flows: { $ref: '#/components/schemas/Flows' }
+    RefreshedToken:
+      type: object
+      required: [access_token, token_type, expires_in, machine_id, workspace_id, flows]
+      additionalProperties: false
+      properties:
+        access_token: { $ref: '#/components/schemas/Opaque' }
+        token_type: { const: DPoP }
+        expires_in: { const: 900 }
+        machine_id: { $ref: '#/components/schemas/Uuid' }
+        workspace_id: { $ref: '#/components/schemas/Uuid' }
+        flows: { $ref: '#/components/schemas/Flows' }
+    MachineSelf:
+      type: object
+      required: [id, name, kind, ownerUserId, signingFingerprint, envelopeFingerprint, flows, pairedAt, lastRefreshAt, revokedAt, workspaceId]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        name: { type: string, minLength: 1, maxLength: 80 }
+        kind: { $ref: '#/components/schemas/MachineKind' }
+        ownerUserId: { $ref: '#/components/schemas/Uuid' }
+        signingFingerprint: { $ref: '#/components/schemas/Fingerprint' }
+        envelopeFingerprint: { $ref: '#/components/schemas/Fingerprint' }
+        flows: { $ref: '#/components/schemas/Flows' }
+        pairedAt: { $ref: '#/components/schemas/IsoOut' }
+        lastRefreshAt: { $ref: '#/components/schemas/IsoOut' }
+        revokedAt: { type: 'null', description: 'Always null here: a revoked machine cannot authenticate.' }
+        workspaceId: { $ref: '#/components/schemas/Uuid' }
+
+    # ── metrics ingest ────────────────────────────────────────────────────────────────────
+    Count: { type: integer, minimum: 0 }
+    Amount: { type: number, minimum: 0 }
+    Text: { type: string, maxLength: 1024 }
+    Token: { type: string, pattern: '^[A-Za-z0-9._:@/+-]{1,128}$' }
+    Key: { type: string, minLength: 1, maxLength: 128, pattern: '^[^\u0000-\u001f\u007f]+$' }
+    Counts:
+      type: object
+      maxProperties: 500
+      propertyNames: { $ref: '#/components/schemas/Key' }
+      additionalProperties: { $ref: '#/components/schemas/Amount' }
+    Strings:
+      type: array
+      maxItems: 500
+      items: { $ref: '#/components/schemas/Key' }
+    Amounts:
+      type: array
+      maxItems: 10000
+      items: { $ref: '#/components/schemas/Amount' }
+    IsoList:
+      type: array
+      maxItems: 10000
+      items: { $ref: '#/components/schemas/Iso' }
+    Tree:
+      description: '`daily` (day → counters, one nested level for hours) and `model_usage` (model → counters).'
+      type: object
+      maxProperties: 500
+      propertyNames: { $ref: '#/components/schemas/Key' }
+      additionalProperties:
+        type: object
+        propertyNames: { $ref: '#/components/schemas/Key' }
+        additionalProperties:
+          oneOf:
+            - { $ref: '#/components/schemas/Amount' }
+            - type: object
+              propertyNames: { $ref: '#/components/schemas/Key' }
+              additionalProperties: { $ref: '#/components/schemas/Amount' }
+    Label:
+      description: T2. Any length is accepted; the Cloud keeps the first 500 characters, and none at all while `sessionTitles` is off. Redacted.
+      type: string
+    SessionMetrics:
+      description: |
+        One session, a projection of agentistics `SessionMeta`: identity, T1 usage metadata and T2
+        labels; never content. `null` on any optional field means "absent". Unknown keys are dropped
+        and counted; a key in `contentFields` refuses the request (422). Every string, keys
+        included, is run through `redactSecrets` before storage.
+      type: object
+      x-null-means-absent: true
+      required: [session_id, harness, seq, project_path, start_time]
+      additionalProperties: true
+      properties:
+        session_id: { type: string, pattern: '^[A-Za-z0-9._:-]{1,128}$' }
+        harness: { type: string, pattern: '^[A-Za-z0-9._:-]{1,128}$' }
+        seq:
+          description: The journal position the metrics were computed at. Per session, the highest `seq` wins; equal `seq` with equal content is `unchanged`.
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        # T1
+        project_path: { $ref: '#/components/schemas/Text' }
+        git_remote: { $ref: '#/components/schemas/Text' }
+        model: { $ref: '#/components/schemas/Token' }
+        start_time: { $ref: '#/components/schemas/Iso' }
+        end_time: { $ref: '#/components/schemas/Iso' }
+        duration_minutes: { $ref: '#/components/schemas/Amount' }
+        active_minutes: { $ref: '#/components/schemas/Amount' }
+        user_message_count: { $ref: '#/components/schemas/Count' }
+        assistant_message_count: { $ref: '#/components/schemas/Count' }
+        user_chars: { $ref: '#/components/schemas/Count' }
+        user_char_messages: { $ref: '#/components/schemas/Count' }
+        assistant_chars: { $ref: '#/components/schemas/Count' }
+        assistant_char_messages: { $ref: '#/components/schemas/Count' }
+        input_tokens: { $ref: '#/components/schemas/Count' }
+        output_tokens: { $ref: '#/components/schemas/Count' }
+        cache_read_input_tokens: { $ref: '#/components/schemas/Count' }
+        cache_creation_input_tokens: { $ref: '#/components/schemas/Count' }
+        cache_creation_1h_input_tokens: { $ref: '#/components/schemas/Count' }
+        cache_creation_5m_input_tokens: { $ref: '#/components/schemas/Count' }
+        context_tokens: { $ref: '#/components/schemas/Count' }
+        context_window: { $ref: '#/components/schemas/Count' }
+        compact_count: { $ref: '#/components/schemas/Count' }
+        compact_ms: { $ref: '#/components/schemas/Count' }
+        compact_dropped_tokens: { $ref: '#/components/schemas/Count' }
+        cost_usd: { $ref: '#/components/schemas/Amount' }
+        tool_counts: { $ref: '#/components/schemas/Counts' }
+        tool_output_tokens: { $ref: '#/components/schemas/Counts' }
+        tool_errors: { $ref: '#/components/schemas/Count' }
+        tool_error_categories: { $ref: '#/components/schemas/Counts' }
+        skill_uses: { $ref: '#/components/schemas/Counts' }
+        mcp_tool_call_count: { $ref: '#/components/schemas/Count' }
+        mcp_tool_names: { $ref: '#/components/schemas/Strings' }
+        languages: { $ref: '#/components/schemas/Strings' }
+        git_commits: { $ref: '#/components/schemas/Count' }
+        git_pushes: { $ref: '#/components/schemas/Count' }
+        lines_added: { $ref: '#/components/schemas/Count' }
+        lines_removed: { $ref: '#/components/schemas/Count' }
+        files_modified: { $ref: '#/components/schemas/Count' }
+        user_interruptions: { $ref: '#/components/schemas/Count' }
+        user_response_times: { $ref: '#/components/schemas/Amounts' }
+        message_hours: { $ref: '#/components/schemas/Amounts' }
+        user_message_timestamps: { $ref: '#/components/schemas/IsoList' }
+        uses_task_agent: { type: boolean }
+        uses_mcp: { type: boolean }
+        uses_web_search: { type: boolean }
+        uses_web_fetch: { type: boolean }
+        daily: { $ref: '#/components/schemas/Tree' }
+        model_usage: { $ref: '#/components/schemas/Tree' }
+        # T2
+        title: { $ref: '#/components/schemas/Label' }
+        first_prompt: { $ref: '#/components/schemas/Label' }
+        user_label: { $ref: '#/components/schemas/Label' }
+        user_note: { $ref: '#/components/schemas/Label' }
+    MinMaxAvg:
+      type: object
+      required: [min, avg, max]
+      additionalProperties: true
+      properties:
+        min: { $ref: '#/components/schemas/Amount' }
+        avg: { $ref: '#/components/schemas/Amount' }
+        max: { $ref: '#/components/schemas/Amount' }
+    HardwareSample:
+      description: One minute of hardware use. Metric names outside the list are dropped and counted.
+      type: object
+      required: [minute]
+      additionalProperties: true
+      properties:
+        minute: { $ref: '#/components/schemas/Iso' }
+        cpu: { $ref: '#/components/schemas/MinMaxAvg' }
+        ram: { $ref: '#/components/schemas/MinMaxAvg' }
+        gpu: { $ref: '#/components/schemas/MinMaxAvg' }
+        vram: { $ref: '#/components/schemas/MinMaxAvg' }
+        disk: { $ref: '#/components/schemas/MinMaxAvg' }
+        net_rx: { $ref: '#/components/schemas/MinMaxAvg' }
+        net_tx: { $ref: '#/components/schemas/MinMaxAvg' }
+    Operational:
+      description: T0. Kept only while `metrics` is on; with it off the machine's card is online/offline only. `null` on a field means absent.
+      type: object
+      x-null-means-absent: true
+      additionalProperties: true
+      properties:
+        agent_version: { $ref: '#/components/schemas/Token' }
+        platform: { $ref: '#/components/schemas/Token' }
+        arch: { $ref: '#/components/schemas/Token' }
+        counts: { $ref: '#/components/schemas/Counts' }
+        samples:
+          type: array
+          maxItems: 120
+          items: { $ref: '#/components/schemas/HardwareSample' }
+    IngestRequest:
+      type: object
+      required: [v, sent_at]
+      additionalProperties: true
+      properties:
+        v: { const: 1 }
+        sent_at:
+          description: The machine's clock when it sent the push; skew beyond 5 minutes is flagged, never refused.
+          $ref: '#/components/schemas/Iso'
+        operational:
+          oneOf:
+            - { type: 'null' }
+            - { $ref: '#/components/schemas/Operational' }
+        sessions:
+          description: Up to 50 per request (else 413 batch_too_large with `maxBatch`). Absent = a T0-only heartbeat.
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/SessionMetrics' }
+    SessionStatus:
+      description: |
+        CLOSED enum: every value is durable progress, so the machine advances its cursor past the
+        session. Adding a value is a MAJOR change (an old client would advance past it).
+      type: string
+      enum: [applied, unchanged, stale, not_shared]
+    IngestResult:
+      type: object
+      required: [results, t0, titles, redacted, droppedFields, clockSkewMs, clockSkewFlagged, cadence]
+      additionalProperties: false
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [session_id, harness, seq, status]
+            additionalProperties: false
+            properties:
+              session_id: { type: string }
+              harness: { type: string }
+              seq: { type: integer, minimum: 0 }
+              status: { $ref: '#/components/schemas/SessionStatus' }
+        t0: { type: string, enum: [full, online_only] }
+        titles: { type: string, enum: [kept, stripped] }
+        redacted: { type: integer, minimum: 0, description: Strings changed by redactSecrets in this push. }
+        droppedFields: { type: integer, minimum: 0 }
+        clockSkewMs: { type: integer, description: sent_at minus the Cloud's receive time. }
+        clockSkewFlagged: { type: boolean }
+        cadence:
+          description: The Cloud owns the cadence; the machine debounces to minIntervalS and batches under maxBatch.
+          type: object
+          required: [minIntervalS, maxBatch]
+          additionalProperties: false
+          properties:
+            minIntervalS: { type: integer, minimum: 1 }
+            maxBatch: { type: integer, minimum: 1 }
+    ShareSource:
+      type: object
+      required: [type, value]
+      additionalProperties: true
+      properties:
+        type: { type: string, enum: [repo, project, none] }
+        value: { type: string, maxLength: 1024, description: 'A git remote in any form (canonicalized), a project path, or "" for none.' }
+    SharingRules:
+      description: The machine's per-repository sharing rules (the machine decides; the Cloud enforces). An empty allowlist shares nothing.
+      type: object
+      required: [mode, sources]
+      additionalProperties: true
+      properties:
+        mode: { type: string, enum: [denylist, allowlist] }
+        sources:
+          type: array
+          maxItems: 1000
+          items: { $ref: '#/components/schemas/ShareSource' }
+    SharingRulesOut:
+      type: object
+      required: [mode, sources]
+      additionalProperties: false
+      properties:
+        mode: { type: string, enum: [denylist, allowlist] }
+        sources:
+          type: array
+          items:
+            type: object
+            required: [type, value]
+            additionalProperties: false
+            properties:
+              type: { type: string, enum: [repo, project, none] }
+              value: { type: string }
+    SharingUpdated:
+      type: object
+      required: [mode, sources, removed]
+      additionalProperties: false
+      properties:
+        mode: { type: string, enum: [denylist, allowlist] }
+        sources: { $ref: '#/components/schemas/SharingRulesOut/properties/sources' }
+        removed: { type: integer, minimum: 0, description: Stored sessions the new rules excluded and the Cloud deleted. }
+
+    # ── encrypted backup (1.1) ────────────────────────────────────────────────────────────
+    # Everything is sealed on the device. The Cloud stores and returns these values; it opens none.
+    Base64:
+      description: Standard base64 with padding.
+      type: string
+      minLength: 1
+      maxLength: 4096
+      pattern: '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$'
+    # The three values the client builds (public packages/vault/src/artifact). The Cloud checks shape
+    # and size (each at most maxWrapBytes as JSON) and stores them; it opens and verifies nothing.
+    DekWrap:
+      description: A snapshot's data key wrapped to the backup key.
+      type: object
+      required: [v, senderPublicKey, ephemeralPublicKey, nonce, ct]
+      additionalProperties: false
+      properties:
+        v: { const: 1 }
+        senderPublicKey: { $ref: '#/components/schemas/Base64' }
+        ephemeralPublicKey: { $ref: '#/components/schemas/Base64' }
+        nonce: { $ref: '#/components/schemas/Base64' }
+        ct: { $ref: '#/components/schemas/Base64' }
+    RecoveryWrap:
+      description: The backup private key wrapped under the recovery words.
+      type: object
+      required: [v, nonce, ct]
+      additionalProperties: false
+      properties:
+        v: { const: 1 }
+        nonce: { $ref: '#/components/schemas/Base64' }
+        ct: { $ref: '#/components/schemas/Base64' }
+    SenderCert:
+      description: A device's statement about its sender key. Verified by clients with the backup key, never by the Cloud.
+      type: object
+      required: [v, senderPublicKey, cert]
+      additionalProperties: false
+      properties:
+        v: { const: 1 }
+        senderPublicKey: { $ref: '#/components/schemas/Base64' }
+        cert: { $ref: '#/components/schemas/Base64' }
+    SenderCertRequest:
+      type: object
+      required: [senderCert]
+      additionalProperties: true
+      properties:
+        senderCert: { $ref: '#/components/schemas/SenderCert' }
+    SnapshotId:
+      description: Chosen by the client (random), unique per person.
+      type: string
+      pattern: '^[A-Za-z0-9_-]{16,64}$'
+    Digest:
+      description: Lower-case hex sha256 of one uploaded (sealed) chunk.
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+    BackupKeyRequest:
+      type: object
+      required: [publicKey, fingerprint, recoveryWrap]
+      additionalProperties: true
+      properties:
+        publicKey: { description: 'The backup key (X25519), standard base64 SPKI DER.', type: string, maxLength: 256, pattern: '^[A-Za-z0-9+/]+={0,2}$' }
+        fingerprint: { description: Of publicKey; checked by the Cloud., $ref: '#/components/schemas/Fingerprint' }
+        recoveryWrap: { $ref: '#/components/schemas/RecoveryWrap' }
+    BackupKeySet:
+      type: object
+      required: [fingerprint, wrapVersion]
+      additionalProperties: false
+      properties:
+        fingerprint: { $ref: '#/components/schemas/Fingerprint' }
+        wrapVersion: { const: 1 }
+    RecoveryWrapRequest:
+      type: object
+      required: [recoveryWrap, expectedVersion]
+      additionalProperties: true
+      properties:
+        recoveryWrap: { $ref: '#/components/schemas/RecoveryWrap' }
+        expectedVersion: { type: integer, minimum: 1, description: The version this change replaces (compare-and-set). }
+    RecoveryWrapSet:
+      type: object
+      required: [wrapVersion]
+      additionalProperties: false
+      properties:
+        wrapVersion: { type: integer, minimum: 2 }
+    BackupStart:
+      type: object
+      required: [snapshotId, chunks, totalBytes, manifestBytes]
+      additionalProperties: true
+      properties:
+        snapshotId: { $ref: '#/components/schemas/SnapshotId' }
+        chunks: { type: integer, minimum: 1, maximum: 6000 }
+        totalBytes:
+          description: |
+            PLAINTEXT size of the object: (chunks − 1) × chunkBytes < totalBytes ≤ chunks × chunkBytes,
+            or 0 with chunks 1 (the empty object). Chunk i is uploaded sealed: its plaintext length
+            (chunkBytes, or the rest for the last) plus tagBytes, exactly.
+          type: integer
+          minimum: 0
+        manifestBytes: { description: 'Size of the sealed manifest as uploaded.', type: integer, minimum: 1, maximum: 4194320 }
+    SignedPart:
+      type: object
+      required: [part, url, headers, expiresIn]
+      additionalProperties: false
+      properties:
+        part: { description: 'Chunk index ("0", "1", …) or "manifest".', type: string, pattern: '^([0-9]+|manifest)$' }
+        url: { type: string, pattern: '^https?://' }
+        headers: { description: 'Send these with the request, exactly.', type: object, additionalProperties: { type: string } }
+        expiresIn: { const: 900 }
+    BackupUpload:
+      type: object
+      required: [snapshotId, upload]
+      additionalProperties: false
+      properties:
+        snapshotId: { $ref: '#/components/schemas/SnapshotId' }
+        upload: { type: array, items: { $ref: '#/components/schemas/SignedPart' } }
+    BackupCommit:
+      type: object
+      required: [dekWrap, chunkDigests]
+      additionalProperties: true
+      properties:
+        dekWrap: { $ref: '#/components/schemas/DekWrap' }
+        chunkDigests: { type: array, maxItems: 6000, items: { $ref: '#/components/schemas/Digest' } }
+    BackupCommitted:
+      type: object
+      required: [id, state, committedAt]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/SnapshotId' }
+        state: { const: committed }
+        committedAt: { $ref: '#/components/schemas/IsoOut' }
+    BackupSummary:
+      type: object
+      required: [id, machineId, state, chunks, totalBytes, manifestBytes, createdAt, committedAt]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/SnapshotId' }
+        machineId: { $ref: '#/components/schemas/Uuid' }
+        state: { const: committed }
+        chunks: { type: integer, minimum: 1 }
+        totalBytes: { type: integer, minimum: 0 }
+        manifestBytes: { type: integer, minimum: 1 }
+        createdAt: { $ref: '#/components/schemas/IsoOut' }
+        committedAt: { $ref: '#/components/schemas/IsoOut' }
+    BackupList:
+      type: object
+      required: [backups]
+      additionalProperties: false
+      properties:
+        backups: { description: 'Committed snapshots, newest first (at most 1000).', type: array, items: { $ref: '#/components/schemas/BackupSummary' } }
+    BackupDetail:
+      type: object
+      required: [id, machineId, state, chunks, totalBytes, manifestBytes, createdAt, committedAt, dekWrap, chunkDigests, download]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/SnapshotId' }
+        machineId: { $ref: '#/components/schemas/Uuid' }
+        state: { const: committed }
+        chunks: { type: integer, minimum: 1 }
+        totalBytes: { type: integer, minimum: 0 }
+        manifestBytes: { type: integer, minimum: 1 }
+        createdAt: { $ref: '#/components/schemas/IsoOut' }
+        committedAt: { $ref: '#/components/schemas/IsoOut' }
+        dekWrap: { $ref: '#/components/schemas/DekWrap' }
+        chunkDigests: { type: array, items: { $ref: '#/components/schemas/Digest' } }
+        download: { type: array, items: { $ref: '#/components/schemas/SignedPart' } }
+
+  responses:
+    OAuthError:
+      description: RFC 6749 error.
+      content: { application/json: { schema: { $ref: '#/components/schemas/OAuthError' } } }
+    RateLimited:
+      description: Per-address ceiling or block. Back off for Retry-After seconds (the reference client treats it like slow_down).
+      headers: { Retry-After: { $ref: '#/components/headers/RetryAfter' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/RateLimited' } } }
+    MachineUnauthorized:
+      description: |
+        `invalid_token`: unknown or expired access token, machine revoked, or its owner left — refresh,
+        and pair again if the refresh answers invalid_grant. `invalid_dpop_proof`: the proof is
+        missing, malformed, stale, replayed, for another request, or signed by another key.
+      headers: { WWW-Authenticate: { $ref: '#/components/headers/WWWAuthenticate' } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/MachineAuthError' } } }
+    Error:
+      description: See `Error.error` for the code.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+paths:
+  /oauth/device_authorization:
+    post:
+      operationId: startPairing
+      summary: Register the machine's public keys and get a code for the person to approve (RFC 8628 §3.1).
+      description: |
+        The Ed25519 signing key is the `jwk` of the DPoP proof; the device code is bound to its
+        thumbprint, so only the key that asked can redeem it. The X25519 envelope key travels in the
+        form. Limited per address (20 / 15 min).
+      security: []
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/DeviceAuthorizationForm' }
+      responses:
+        '200':
+          description: Show `user_code` and `verification_uri_complete`; poll /oauth/token every `interval` seconds.
+          content: { application/json: { schema: { $ref: '#/components/schemas/DeviceAuthorization' } } }
+        '400': { $ref: '#/components/responses/OAuthError' }
+        '401': { $ref: '#/components/responses/OAuthError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /oauth/token:
+    post:
+      operationId: token
+      summary: Redeem the device code (pairing) or refresh the access token; every call carries a proof by the machine key.
+      description: |
+        Device-code grant answers while waiting: `authorization_pending`; polling faster than
+        `interval` → `slow_down` (add 5 s); `access_denied` (the person refused, or left the
+        workspace before the poll); `expired_token` (10 minutes passed); `invalid_grant` (not this
+        key's code, or already redeemed). Refresh answers `invalid_grant` when the machine must pair
+        again. Wrong grants and bad proofs count toward a per-address block (30 / 15 min).
+      security: []
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - { $ref: '#/components/schemas/DeviceCodeTokenForm' }
+                - { $ref: '#/components/schemas/RefreshTokenForm' }
+      responses:
+        '200':
+          description: A DPoP-bound access token (15 minutes). The device-code grant also returns the refresh token, once.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/PairedToken' }
+                  - { $ref: '#/components/schemas/RefreshedToken' }
+        '400': { $ref: '#/components/responses/OAuthError' }
+        '401': { $ref: '#/components/responses/OAuthError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine:
+    get:
+      operationId: getMachine
+      summary: This machine's own record, as the Cloud holds it (flows included).
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      responses:
+        '200':
+          description: The machine.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MachineSelf' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+
+  /v1/machine/disconnect:
+    post:
+      operationId: disconnect
+      summary: The machine revokes itself (`agentop disconnect`). Its tokens die at once; local data stays.
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      responses:
+        '204': { description: Revoked. Delete the local credential; keep the identity keys (re-pairing may reuse them). }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+
+  /v1/machine/metrics:
+    post:
+      operationId: pushMetrics
+      summary: Push computed metrics (T0 operational, T1 usage, T2 labels). Never content.
+      description: |
+        Idempotent per (machine, harness, session_id): the newest `seq` wins, so a re-push never
+        double counts and an out-of-order one never goes backwards. Advance the local cursor only
+        for sessions in `results`. Body may be `content-encoding: gzip`; ≤ 2 MiB on the wire and
+        ≤ 8 MiB decoded. With no sessions it is a heartbeat.
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IngestRequest' }
+      responses:
+        '200':
+          description: What the Cloud did with each session, and what it kept.
+          content: { application/json: { schema: { $ref: '#/components/schemas/IngestResult' } } }
+        '400':
+          description: invalid_json, invalid_encoding, invalid_body (with `field`), invalid_session (with `field`, `index`). A client bug; do not retry the same body.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: metrics` and a `reason` sentence: sessions were sent while the person switched metrics off. Send T0 heartbeats only.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: '`body_too_large`, or `batch_too_large` with `maxBatch` (adopt it and retry the same sessions).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: unsupported_media_type (not application/json) or unsupported_encoding (not gzip/identity).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '422':
+          description: '`content_not_accepted` with the `field` (and `index`) that names content. A client bug the Cloud refuses to absorb.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/machine/metrics/sharing:
+    get:
+      operationId: getSharing
+      summary: The sharing rules the Cloud enforces for this machine (deny nothing, by default).
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      responses:
+        '200':
+          description: The rules.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SharingRulesOut' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+    put:
+      operationId: setSharing
+      summary: Replace the rules. Stored sessions they now exclude are deleted at once.
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SharingRules' }
+      responses:
+        '200':
+          description: The rules as stored, and how many sessions were removed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SharingUpdated' } } }
+        '400':
+          description: invalid_rules, invalid_json, invalid_encoding.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '413':
+          description: body_too_large (256 KiB).
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: unsupported_media_type, unsupported_encoding.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  /v1/machine/keys/backup:
+    put:
+      operationId: setBackupKey
+      summary: 'Register the person''s backup key, once. Public half, fingerprint and the opaque recovery wrap.'
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupKeyRequest' }
+      responses:
+        '201':
+          description: 'Stored.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupKeySet' } } }
+        '400':
+          description: 'invalid_json, invalid_encoding, invalid_body (with `field`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: '`already_set` with the `fingerprint` and `wrapVersion` the person already has.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: 'body_too_large.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: 'unsupported_media_type, unsupported_encoding.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine/keys/backup/recovery-wrap:
+    put:
+      operationId: setRecoveryWrap
+      summary: 'Replace the recovery wrap (new recovery words), compare-and-set on its version.'
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecoveryWrapRequest' }
+      responses:
+        '200':
+          description: 'Replaced.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/RecoveryWrapSet' } } }
+        '400':
+          description: 'invalid_json, invalid_encoding, invalid_body (with `field`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: 'backup_key_not_set.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: '`wrap_moved` with the current `wrapVersion`: read again before replacing.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: 'body_too_large.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: 'unsupported_media_type, unsupported_encoding.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine/keys/backup/sender-certs:
+    put:
+      operationId: putSenderCert
+      summary: 'Publish (or renew) the certificate of this device''s sender key.'
+      description: |
+        Upsert by `senderCert.senderPublicKey` (a 32-byte key); only the machine that put an entry
+        replaces it. No expiry: revoking the machine marks its entry `revokedAt` and keeps it, and a
+        marked entry cannot be replaced. The person reads the list with the backup key, and may remove
+        an entry (browser session and step-up).
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SenderCertRequest' }
+      responses:
+        '204': { description: Stored. }
+        '400':
+          description: 'invalid_json, invalid_encoding, invalid_body (with `field`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup`.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: 'backup_key_not_set.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: 'sender_cert_owned (another machine put that key), sender_cert_revoked, too_many_senders, sender_cert_moved (retry).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: 'body_too_large.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: 'unsupported_media_type, unsupported_encoding.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine/backups:
+    post:
+      operationId: startBackup
+      summary: 'Reserve quota for a snapshot and get one create-only upload URL per part.'
+      description: |
+        PUT each part to its `url` with its `headers`. An existing object is never overwritten (412).
+        Asking again with the same values while it is uncommitted answers 200 with fresh URLs for what
+        is still missing. An upload not committed within 6 hours is dropped; until then it counts toward the quota.
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupStart' }
+      responses:
+        '200':
+          description: 'Same uncommitted upload: URLs for the missing parts.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupUpload' } } }
+        '201':
+          description: 'Reserved.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupUpload' } } }
+        '400':
+          description: 'invalid_json, invalid_encoding, invalid_body (with `field`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: 'snapshot_exists: that id is committed, deleted, or declared differently.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: '`quota_exceeded` with a `reason` sentence, `quotaBytes`, `usedBytes`; or body_too_large.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: 'unsupported_media_type, unsupported_encoding.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      operationId: listBackups
+      summary: 'The person''s committed snapshots, from any of their machines.'
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }, { name: machine, in: query, required: false, schema: { type: string } }]
+      responses:
+        '200':
+          description: 'Newest first.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupList' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine/backups/{snapshotId}/commit:
+    put:
+      operationId: commitBackup
+      summary: 'The commit point: the snapshot is listed only if every part exists with the declared size.'
+      description: |
+        Retrying with the same values answers the same 200.
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }, { name: snapshotId, in: path, required: true, schema: { $ref: '#/components/schemas/SnapshotId' } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackupCommit' }
+      responses:
+        '200':
+          description: 'Committed.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupCommitted' } } }
+        '400':
+          description: 'invalid_json, invalid_encoding, invalid_body (with `field`).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: 'backup_not_found.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: 'already_committed with different values.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '412':
+          description: '`missing_parts` with `missing`; or size_mismatch (the objects do not add up to what was declared).'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '413':
+          description: 'body_too_large.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '415':
+          description: 'unsupported_media_type, unsupported_encoding.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /v1/machine/backups/{snapshotId}:
+    get:
+      operationId: getBackup
+      summary: 'One committed snapshot: its wrapped key, digests and download URLs.'
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }, { name: snapshotId, in: path, required: true, schema: { $ref: '#/components/schemas/SnapshotId' } }]
+      responses:
+        '200':
+          description: 'The snapshot.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/BackupDetail' } } }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: 'backup_not_found.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: deleteBackup
+      summary: 'Crypto-shred: the wrapped key is destroyed at once, the objects within 30 days.'
+      security: [{ dpop: [] }]
+      parameters: [{ $ref: '#/components/parameters/DPoPProof' }, { name: snapshotId, in: path, required: true, schema: { $ref: '#/components/schemas/SnapshotId' } }]
+      responses:
+        '204': { description: Deleted. }
+        '401': { $ref: '#/components/responses/MachineUnauthorized' }
+        '403':
+          description: '`flow_disabled` with `flow: backup` and a `reason` sentence: the switch is off for this machine.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '404':
+          description: 'backup_not_found.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429': { $ref: '#/components/responses/RateLimited' }

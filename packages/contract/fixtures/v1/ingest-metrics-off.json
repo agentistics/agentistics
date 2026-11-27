@@ -1,0 +1,21 @@
+{
+  "contract": "1.0.0",
+  "description": "The person switched metrics off at pairing: sessions are refused with a sentence to show; a heartbeat is accepted and only online/offline is kept.",
+  "flows": { "metrics": false, "sessionTitles": true, "sessionSync": true, "remoteAccess": true },
+  "steps": [
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [{ "session_id": "s-1", "harness": "claude-code", "seq": 1, "project_path": "/p", "start_time": "2026-10-02T09:00:00Z" }]
+      },
+      "expect": { "status": 403, "subset": { "error": "flow_disabled", "flow": "metrics" } }
+    },
+    {
+      "operation": "pushMetrics",
+      "body": { "v": 1, "sent_at": "2026-10-02T12:00:00Z", "operational": { "agent_version": "2.35.1" } },
+      "expect": { "status": 200, "subset": { "results": [], "t0": "online_only" } }
+    }
+  ]
+}

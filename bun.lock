@@ -51,6 +51,10 @@
         "agentop": "bin/agentop.js",
       },
     },
+    "packages/contract": {
+      "name": "@agentistics/contract",
+      "version": "1.1.0",
+    },
     "packages/core": {
       "name": "@agentistics/core",
       "version": "2.223.0",
@@ -166,6 +170,8 @@
   },
   "packages": {
     "@agentistics/agentop": ["@agentistics/agentop@workspace:packages/agentop"],
+
+    "@agentistics/contract": ["@agentistics/contract@workspace:packages/contract"],
 
     "@agentistics/core": ["@agentistics/core@workspace:packages/core"],
 

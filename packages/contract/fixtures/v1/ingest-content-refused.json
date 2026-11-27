@@ -1,0 +1,22 @@
+{
+  "contract": "1.0.0",
+  "description": "A field whose NAME means content (T3) refuses the whole request, wherever it appears. Unlike an unknown field, this is never dropped quietly: the client has a bug.",
+  "steps": [
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [
+          { "session_id": "s-1", "harness": "claude-code", "seq": 1, "project_path": "/p", "start_time": "2026-10-02T09:00:00Z", "prompt": "the user's actual words" }
+        ]
+      },
+      "expect": { "status": 422, "subset": { "error": "content_not_accepted", "field": "prompt", "index": 0 } }
+    },
+    {
+      "operation": "pushMetrics",
+      "body": { "v": 1, "sent_at": "2026-10-02T12:00:00Z", "transcript": [] },
+      "expect": { "status": 422, "subset": { "error": "content_not_accepted", "field": "transcript" } }
+    }
+  ]
+}

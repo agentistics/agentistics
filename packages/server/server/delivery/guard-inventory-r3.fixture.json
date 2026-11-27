@@ -540,6 +540,8 @@
       "text:.agentistics/briefing-state.json",
       "text:.agentistics/cache.db",
       "text:.agentistics/claude-chat",
+      "text:.agentistics/cloud-credential.",
+      "text:.agentistics/cloud-identity.",
       "text:.agentistics/composer-messages",
       "text:.agentistics/content",
       "text:.agentistics/conversation-resumes",
@@ -1149,6 +1151,8 @@
     "server/server/vault/boot.ts": [
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR"
     ],
     "server/server/vault/gate.ts": [
@@ -1167,6 +1171,7 @@
     "server/server/vault/ops.ts": [
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
+      "ident:AGENTISTICS_DATA_DIR",
       "ident:DEFAULT_AGENTISTICS_DATA_DIR",
       "ident:DEFAULT_AGENTISTICS_DATA_DIR",
       "text:~/.agentistics/github-backup.sealed"
@@ -1176,6 +1181,8 @@
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
       "ident:AGENTISTICS_DATA_DIR",
+      "text:.agentistics/cloud-credential.",
+      "text:.agentistics/cloud-identity.",
       "text:.agentistics/github-backup.",
       "text:.agentistics/provider-keys"
     ],

@@ -44,6 +44,11 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     unlock: { req: { op: 'unlock' } },
     seal: { req: { op: 'seal', purpose: 'github-backup', name: 'n' }, body: enc(M + '-sealme') },
     'github-config': { req: { op: 'github-config' } },
+    // No URL and no pairing: each answers without a network call.
+    'cloud-login-start': { req: { op: 'cloud-login-start' } },
+    'cloud-login-poll': { req: { op: 'cloud-login-poll', handle: 'none' } },
+    'cloud-status': { req: { op: 'cloud-status' } },
+    'cloud-logout': { req: { op: 'cloud-logout' } },
     'github-fetch': { req: { op: 'github-fetch', method: 'GET', url: 'https://api.github.com/repos/someone/else' } },
     'vault-init': { req: { op: 'vault-init' } },
     'vault-rekey': { req: { op: 'vault-rekey', protector: 'nope' } },
@@ -88,6 +93,13 @@ describe('every vault.sock op, with marker secrets in the vault', () => {
     expect(r!.reply.ok).toBe(true)
     const back = openRecord({ dek: o!.dek, kid: o!.kid, purpose: 'github-backup', name: 'n', bytes: r!.body! })
     expect(back.ok && new TextDecoder().decode(back.plaintext)).toBe(M)
+  })
+
+  test('seal refuses the Cloud records: only the service writes them', async () => {
+    for (const purpose of ['cloud-identity', 'cloud-credential']) {
+      const r = await askVault({ op: 'seal', purpose, name: purpose }, { path: sock, body: enc('x') })
+      expect(r!.reply).toMatchObject({ ok: false, code: 'purpose' })
+    }
   })
 
   test('seal refuses a runner-scope purpose', async () => {

@@ -192,6 +192,17 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
       + 'table exists to keep out of an archive.',
   },
   {
+    pattern: '.agentistics/cloud-identity.', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop cloud login',
+    why: 'The machine keys paired with Agentistics Cloud (cloud/identity.ts, sealed by the vault). A copy '
+      + 'would let a second machine answer as this one; a new machine generates its own and pairs again.',
+  },
+  {
+    pattern: '.agentistics/cloud-credential.', match: 'prefix', reason: 'secret',
+    restoreWith: 'agentop cloud login',
+    why: 'The Cloud refresh token (cloud/identity.ts, sealed by the vault), bound to this machine\'s key.',
+  },
+  {
     // The TRAILING SLASH matters: `.agentistics/accounts.json` (the registry, in ALWAYS) must not match.
     pattern: '.agentistics/accounts/', match: 'prefix', reason: 'secret',
     restoreWith: 'Billing → Add account (sign in again)',

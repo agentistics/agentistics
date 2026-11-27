@@ -11,24 +11,29 @@
  *   github-config               the GitHub-backup config with the token REMOVED (`hasToken` instead)
  *   github-fetch                one GitHub REST call to the CONFIGURED repository, the token added
  *                               here; the reply is GitHub's answer (never the token)
+ *   cloud-login-start / cloud-login-poll / cloud-status / cloud-logout
+ *                               Agentistics Cloud pairing, run where the sealed keys are
+ *                               (cloud/ops.ts); no reply carries a code, token or private key
  *   vault-init / vault-rekey / vault-add-passphrase / vault-reset
  *                               the vault's own administration, run where the key is
  *
  * Every op validates its own inputs; an unknown op is `bad-request`. `ops.test.ts` runs each op with
  * a marker secret in the vault and asserts the marker appears in no reply and no reply body.
  */
+import { join } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import type { SealedStore } from '../cloud/identity'
 import { noteFreshSpawn } from '../sessions/harness-spawnable'
 import { grantOf, grantedRef, scrubFor, scrubWithinLimit, useRef } from './grants'
 import { buildVaultBundle, stageBundleRestore } from './bundle-io'
 import {
-  addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
+  VaultRefusalError, addPassphraseWrapper, destroyVault, initSentence, rekeyVault, scopeOfPurpose, scrubFile, setupCodeCommand, setupCodeTtyRefusal, type ProtectorId,
 } from '@agentistics/vault'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import {
   adoptCreated, chooseAutoProtector, createVault, ensureVaultOpen, lockVault, protectorById, protectorLabel,
   refused, runMigrations, sealBytes, sentence, unlockWithGesture, vaultAudit, vaultDir, vaultExists, vaultLang,
-  vaultRole, vaultStatus, withSecret, noteVaultActivity, dropUnlockWindow,
+  vaultRole, vaultStatus, withSecret, noteVaultActivity, dropUnlockWindow, openFromFile, sealToFile, secretFs,
 } from './service'
 import {
   addPassphraseAllowed, beginAuthenticator, mintSetupCode, beginRecoveryKey, completeUnlock, confirmAuthenticator, confirmRecoveryKey,
@@ -99,7 +104,9 @@ async function opSeal(ctx: OpContext): Promise<OpResult> {
   // RESERVED `vault/*` purpose (review S1): the service is the only writer of its own records — a
   // same-user process that could seal `vault/totp-seed` would choose the seed, and so every future
   // authenticator code.
-  if (scopeOfPurpose(purpose) !== 'human' || purpose.startsWith('vault/')) return { reply: refused('purpose', sentence('purpose')) }
+  // The Cloud's two records are the service's own too: a caller that could seal them would choose
+  // this machine's keys, or where its credential is sent.
+  if (scopeOfPurpose(purpose) !== 'human' || purpose.startsWith('vault/') || purpose.startsWith('cloud-')) return { reply: refused('purpose', sentence('purpose')) }
   try {
     const sealed = await sealBytes(purpose, name, ctx.body)
     return { reply: { ok: true }, body: sealed }
@@ -164,6 +171,23 @@ async function opGithubFetch(ctx: OpContext, fetchImpl: typeof fetch = fetch): P
   })
   if (r.ok) return r.value
   return { reply: r.absent ? refused('absent', 'no GitHub backup is configured') : refused(r.code ?? 'locked', r.sentence ?? sentence('locked')) }
+}
+
+// ── Agentistics Cloud ───────────────────────────────────────────────────────────────────────
+
+/** The sealed files behind cloud/identity.ts (which holds no file access of its own). */
+export function cloudSealedStore(dir = AGENTISTICS_DATA_DIR): SealedStore {
+  return {
+    dir,
+    async read(file, purpose) {
+      const r = await openFromFile(join(dir, file), purpose, purpose)
+      if (r.ok) return r.plaintext
+      if (r.absent) return null
+      throw new VaultRefusalError(r.code, r.sentence)
+    },
+    write: (file, purpose, plaintext) => sealToFile(join(dir, file), purpose, purpose, plaintext),
+    remove: file => scrubFile(secretFs(), join(dir, file)),
+  }
 }
 
 // ── the vault's own administration ──────────────────────────────────────────────────────────
@@ -435,6 +459,14 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
     case 'seal': return opSeal(ctx)
     case 'github-config': return opGithubConfig()
     case 'github-fetch': return opGithubFetch(ctx, deps.fetch)
+    case 'cloud-login-start':
+    case 'cloud-login-poll':
+    case 'cloud-status':
+    case 'cloud-logout': {
+      const { handleCloudOp } = await import('../cloud/ops')
+      const fetchImpl = deps.fetch
+      return { reply: await handleCloudOp(h.op, h, { store: cloudSealedStore(), ...(fetchImpl ? { fetch: (req: Request) => fetchImpl(req) } : {}) }) }
+    }
     case 'vault-init': return opInit(h)
     case 'vault-rekey': return opRekey(h)
     case 'vault-add-passphrase': return opAddPassphrase(h)
@@ -456,6 +488,7 @@ export async function handleVaultOp(ctx: OpContext, deps: { fetch?: typeof fetch
 export const VAULT_OPS = [
   'fresh-spawn', 'status', 'lock', 'unlock', 'unlock-code', 'recover', 'authenticator-begin', 'authenticator-confirm',
   'recovery-begin', 'recovery-confirm', 'setup-code', 'presence-enroll', 'set-auto-lock', 'activity', 'seal', 'github-config', 'github-fetch',
+  'cloud-login-start', 'cloud-login-poll', 'cloud-status', 'cloud-logout',
   'vault-init', 'vault-rekey', 'vault-add-passphrase', 'vault-reset',
   'personal-refs', 'personal-ref', 'personal-scrub', 'vault-bundle', 'vault-stage-bundle',
 ] as const

@@ -1,0 +1,16 @@
+{
+  "contract": "1.0.0",
+  "description": "The person switched session titles off at pairing: T2 labels are accepted on the wire and stripped before storage.",
+  "flows": { "metrics": true, "sessionTitles": false, "sessionSync": true, "remoteAccess": true },
+  "steps": [
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [{ "session_id": "s-1", "harness": "claude-code", "seq": 1, "project_path": "/p", "start_time": "2026-10-02T09:00:00Z", "title": "kept local" }]
+      },
+      "expect": { "status": 200, "subset": { "results": [{ "status": "applied" }], "titles": "stripped" } }
+    }
+  ]
+}

@@ -34,6 +34,8 @@ export async function loadVaultConsumers(): Promise<void> {
 export function sealedFiles(): string[] {
   return [
     GITHUB_BACKUP_SEALED_FILE,
+    join(AGENTISTICS_DATA_DIR, 'cloud-identity.sealed'),
+    join(AGENTISTICS_DATA_DIR, 'cloud-credential.sealed'),
   ].filter(p => existsSync(p))
 }
 

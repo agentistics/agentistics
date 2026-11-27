@@ -1,0 +1,15 @@
+{
+  "name": "@agentistics/contract",
+  "version": "1.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "The versioned wire contract between agentistics on your machine and Agentistics Cloud (pairing, DPoP tokens, metrics ingest, encrypted backup).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./json-schema": "./src/json-schema.ts",
+    "./openapi/machine-v1.yaml": "./openapi/machine-v1.yaml"
+  },
+  "files": ["src/", "openapi/", "fixtures/", "CONTRACT.lock", "README.md", "LICENSE"]
+}

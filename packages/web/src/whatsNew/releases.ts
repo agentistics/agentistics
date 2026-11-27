@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [
+      {
+        pt: 'Novo comando `agentop cloud login`, `status` e `logout`: prepara o pareamento deste computador com a Agentistics Cloud. Fica inativo até a Cloud abrir.',
+        en: 'New `agentop cloud login`, `status` and `logout` commands: they prepare pairing this computer with Agentistics Cloud. Inactive until the Cloud opens.',
+      },
+    ],
+    fixes: [],
+  },
   '2.230.5': {
     features: [],
     fixes: [

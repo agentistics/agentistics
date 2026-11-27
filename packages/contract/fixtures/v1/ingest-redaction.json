@@ -1,0 +1,25 @@
+{
+  "contract": "1.0.0",
+  "description": "The Cloud runs redactSecrets on every string again, whatever the machine did: a password in a git remote and a key in a label are stored redacted and counted.",
+  "steps": [
+    {
+      "operation": "pushMetrics",
+      "body": {
+        "v": 1,
+        "sent_at": "2026-10-02T12:00:00Z",
+        "sessions": [
+          {
+            "session_id": "s-redact",
+            "harness": "claude-code",
+            "seq": 1,
+            "project_path": "/p",
+            "git_remote": "https://bob:hunter2Secret9@github.com/acme/api.git",
+            "start_time": "2026-10-02T09:00:00Z",
+            "title": "rotate sk-ant-api03-AbCdEfGhIjKlMnOpQrSt"
+          }
+        ]
+      },
+      "expect": { "status": 200, "subset": { "results": [{ "status": "applied" }], "redacted": 2 } }
+    }
+  ]
+}
