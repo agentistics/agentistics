@@ -26,3 +26,10 @@ describe('BillingSettings wiring', () => {
     expect(src).not.toContain('type="date"')
   })
 })
+
+describe('BillingSettings dates', () => {
+  test("the picker's max is the LOCAL day, not the UTC one", () => {
+    expect(src).toContain('localDayFromMs(Date.now())')
+    expect(src).not.toMatch(/toISOString\(\)\.slice\(0, 10\)/)
+  })
+})

@@ -415,3 +415,18 @@ describe('planAbsentText — the session card agrees with this screen', () => {
     expect(planAbsentText('gemini', 'Gemini', false)).toBe('Gemini does not report plan limits.')
   })
 })
+
+describe('answerNotice — the plan starts on the LOCAL day the account was first seen', () => {
+  const local = (ms: number) => {
+    const d = new Date(ms)
+    const p = (v: number) => String(v).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  }
+  for (const iso of ['2026-09-02T01:00:00Z', '2026-09-01T20:00:00Z', '2026-09-01T12:00:00Z']) {
+    test(`first seen ${iso}`, () => {
+      const ms = Date.parse(iso)
+      const b = answerNotice(none, acc('z', { firstSeen: ms }), 'anthropic-pro', '2026-10-16', newId)!
+      expect(b.accountProfiles?.['claude:z']?.periods[0]?.from).toBe(local(ms))
+    })
+  }
+})

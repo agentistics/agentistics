@@ -18,6 +18,7 @@ import {
   findPlan,
   sortPeriods,
   validateTimeline,
+  localDayFromMs,
   type BillingDetection,
   type BillingPeriod,
   type BillingCurrency,
@@ -86,7 +87,7 @@ const newPeriodId = (): string =>
   `bp_${Math.random().toString(16).slice(2, 8)}${Date.now().toString(16).slice(-6)}`
 
 /** `yyyy-MM-dd` for the date picker's max — nobody is billed for the future. */
-const today = (): string => new Date().toISOString().slice(0, 10)
+const today = (): string => localDayFromMs(Date.now()) ?? ''
 
 const priceText = (p: BillingPeriod, pt: boolean): string | null =>
   p.price ? `${formatPrice(p.price.amount, p.price.currency)}${pt ? '/mês' : '/mo'}` : null
