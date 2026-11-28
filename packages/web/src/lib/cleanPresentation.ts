@@ -33,12 +33,12 @@ export function cleanIdle(ms: number | null, now: number, lang: 'pt' | 'en'): st
   return lang === 'pt' ? `${days} ${days === 1 ? 'dia' : 'dias'}` : `${days} ${days === 1 ? 'day' : 'days'}`
 }
 export function cleanKind(kind: string, pt: boolean): string {
-  return ({ remove: pt ? 'Worktrees já mergeados' : 'Merged worktrees', 'node-modules': pt ? 'node_modules reinstaláveis' : 'Reinstallable node_modules', prune: pt ? 'Registros de pastas que sumiram' : 'Missing folder records', keep: pt ? 'Mantidos por segurança' : 'Kept for safety' } as Record<string, string>)[kind] ?? kind
+  return ({ remove: pt ? 'Worktrees concluídas ou paradas' : 'Finished or idle worktrees', 'node-modules': pt ? 'node_modules reinstaláveis' : 'Reinstallable node_modules', prune: pt ? 'Registros de pastas que sumiram' : 'Missing folder records', keep: pt ? 'Mantidos por segurança' : 'Kept for safety' } as Record<string, string>)[kind] ?? kind
 }
 export function cleanReason(reason: string, pt: boolean): string {
   const words: Record<string, [string, string]> = {
-    main: ['pasta principal', 'main checkout'], locked: ['travado', 'locked'], dirty: ['mudanças não commitadas', 'uncommitted changes'], active: ['em uso', 'in use'], 'unknown-use': ['não dá para saber se está em uso', 'cannot tell whether it is in use'], ignored: ['arquivos ignorados não regeneráveis', 'ignored files that cannot be regenerated'], unmerged: ['não mergeado', 'not merged'],
-    'merged and clean': ['mergeado e limpo', 'merged and clean'], 'directory is gone': ['a pasta não existe mais', 'directory is gone'],
+    main: ['pasta principal', 'main checkout'], locked: ['travado', 'locked'], dirty: ['mudanças não commitadas', 'uncommitted changes'], active: ['em uso', 'in use'], 'unknown-use': ['não dá para saber se está em uso', 'cannot tell whether it is in use'], ignored: ['arquivos ignorados não regeneráveis', 'ignored files that cannot be regenerated'], young: ['último commit há menos de 3 dias', 'last commit less than 3 days ago'], unmerged: ['não mergeado', 'not merged'],
+    'merged and clean': ['mergeado e limpo', 'merged and clean'], 'idle and not merged, patch saved first': ['parado e não mergeado; patch salvo antes', 'idle and not merged; patch saved first'],'directory is gone': ['a pasta não existe mais', 'directory is gone'],
     'no commit in 30+ days': ['sem commit há 30+ dias', 'no commit in 30+ days'], 'changed since the plan': ['mudou desde a varredura', 'changed since the scan'],
     'the server working directory': ['pasta do servidor', 'server working directory'], 'an active session': ['sessão ativa', 'active session'],
     'a process is running inside it (or its location is unknown)': ['há um processo dentro (ou localização desconhecida)', 'a process is running inside (or its location is unknown)'],

@@ -1769,7 +1769,7 @@ async function kill(ref: string, backend: SessionBackend, folder?: string, force
     confirmed = await killAndRetireSession(id, async () => {
       const killed = await backend.kill(id)
       return killed || statusBefore === 'lost' || statusBefore === 'exited'
-    }, undefined, { force })
+    }, undefined, { force, endReason: 'final' })
   } catch (e) {
     const { HoldError } = await import('./hold-guard')
     if (!(e instanceof HoldError)) throw e

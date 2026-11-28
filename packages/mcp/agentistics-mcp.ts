@@ -1234,6 +1234,18 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_clean",
+    description:
+      "Read-only: the disk space of the volume holding the git worktrees against its floor, what the safe cleanup would free (merged or idle worktrees, stale node_modules, records of missing folders, with the reason for every kept one) and a running cleanup. The first call may answer `scanning`; ask again. Removes nothing. / Só leitura: espaço livre no disco das worktrees e o que a limpeza segura liberaria.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agentistics_clean_apply",
+    description:
+      "DELETES the listed items from the cleanup plan (ids from agentistics_clean). Every item is re-checked first; dirty, in-use or unpublished worktrees are refused, branches are never deleted, and unmerged idle ones get their commits saved as patches. Only after the person agreed. / APAGA os itens listados do plano de limpeza; só com o aval da pessoa.",
+    inputSchema: { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"] },
+  },
+  {
     name: "agentistics_browser_status",
     description:
       "Read-only state of agentistics' built-in browser host on this machine: which browser executable it uses (or, in words, why there is none), the browsers running now (whose — a session or the person's own —, pid, open tabs as origin+path and title, PSS memory in MB, idle seconds, whether the systemd memory ceiling holds it and whether the sandbox is on), the ceilings (2 session browsers + 1 personal, tabs per browser), available memory against the 1.5 GB admission floor, why recent browsers stopped (idle, memory, session ended, evicted…) and the last orphan sweep. Starts nothing; the agentistics_browser_* tools drive a session's own browser. / Estado só-leitura do navegador do agentistics: executável, navegadores vivos, tetos, memória, paradas recentes e a última varredura de órfãos.",
@@ -2296,6 +2308,17 @@ async function callTool(
         // S0d: the delivery owner-proof mode and the guard files' seal ride along (absent when the server cannot say).
         const delivery = deliveryIntegrityOf(await apiGet("/api/deliveries/integrity").catch(() => null));
         return text({ ...vaultStatusTool(body), ...(delivery ? { delivery } : {}) });
+      }
+
+      case "agentistics_clean": {
+        const [disk, plan, job] = await Promise.all([apiGet("/api/clean/disk"), apiGet("/api/clean/plan"), apiGet("/api/clean/job")]);
+        return text({ disk, plan, job });
+      }
+
+      case "agentistics_clean_apply": {
+        const ids = (args as { ids?: unknown }).ids;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.some((i) => typeof i !== "string")) throw new Error("ids must be a non-empty array of plan item ids");
+        return text(await apiSend("POST", "/api/clean/apply", { ids }));
       }
 
       case "agentistics_browser_navigate":

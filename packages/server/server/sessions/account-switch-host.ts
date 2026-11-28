@@ -74,7 +74,7 @@ const REAL_IO: SwitchIo = {
   findFiles: findSourceFiles,
   copy: executeCopies,
   limit: readLimitState,
-  killAndRetire: (id, kill) => killAndRetireSession(id, kill),
+  killAndRetire: (id, kill) => killAndRetireSession(id, kill, undefined, { endReason: 'account-switch' }),
   hold: row => observeHoldNow(row),
   startable: startableHere,
   turns: async m => (await import('./handoff-relay-io')).readSessionTurns(m),

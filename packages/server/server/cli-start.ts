@@ -46,7 +46,7 @@ import { homedir, platform } from 'node:os'
 import { accountHome } from './account-home'
 import {
   followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
-  type ConversationLinkReason, type HarnessId,
+  type ConversationLinkReason, type HarnessId, type KillEndReason,
   CANONICAL_MODES, type CanonicalMode, CANONICAL_MODE_TEXT, canonicalOfTuiMode,
   hasRolePrefix,
 } from '@agentistics/core'
@@ -4164,7 +4164,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (live?.alive) {
         // A mode migration ends the session first: never one something live is using (the guard inside the kill says so, in words).
         let held = false
-        const ended = await killAndRetireSession(id, () => backend.kill(id)).catch(e => { held = e instanceof HoldError; return false })
+        const ended = await killAndRetireSession(id, () => backend.kill(id), undefined, { endReason: 'mode-migration' }).catch(e => { held = e instanceof HoldError; return false })
         if (held) return { ok: false, message: pt ? 'Esta sessão está em uso agora: a mudança de modo espera terminar. Nada mudou.' : 'This session is in use right now: the mode change waits until that ends. Nothing changed.' }
         if (!ended) return { ok: false, message: pt ? 'Não foi possível encerrar a sessão no terminal. Nada mudou.' : 'The session could not be ended in the terminal. Nothing changed.' }
       }
@@ -4226,7 +4226,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * `force`: the person confirmed "end anyway" on a session something live is using. Without it the
      * first press is refused (`held: true`) and nothing happens — not even the hand-off flush below.
      */
-    async killSession(id: string, force = false): Promise<ActionResult> {
+    async killSession(id: string, force: boolean | undefined = false, endReason: KillEndReason): Promise<ActionResult> {
       // A NATIVE session has no pane to kill: ENDING it is the engine's verb (`native-fleet.ts`).
       if (isNativeSessionId(id)) return runNativeVerb(id, 'kill', lang)
       const s = S()
@@ -4240,7 +4240,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const { flushBeforeKill } = await import('./sessions/handoff-relay-io')
       const flushed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
       let ended: boolean
-      try { ended = await killAndRetireSession(id, () => backend.kill(id), undefined, { force }) } catch (e) { return heldAsRefusal(e, lang) }
+      try { ended = await killAndRetireSession(id, () => backend.kill(id), undefined, { force, endReason }) } catch (e) { return heldAsRefusal(e, lang) }
       if (!ended) return { ok: false, message: s.sessKillUnconfirmed(id) }
       // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
       // took with it the only record of which conversation this was — the store had not caught up,

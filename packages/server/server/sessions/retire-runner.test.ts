@@ -138,6 +138,22 @@ describe('retire runner on the hub', () => {
     expect(w.calls.kill).toEqual([])
   })
 
+  it('a retire states whether it is a final end or a hand-off (only a final one may clean the worktree)', async () => {
+    const successor: ManagedSession = { id: 's2', harness: 'claude', cwd: '/w', createdAt: new Date(T0).toISOString() }
+    for (const [over, extra, expected] of [[{}, [], 'final'], [{ successorId: 's2' }, [successor], 'handoff']] as const) {
+      const w = world(req(over), [...extra])
+      const reasons: string[] = []
+      w.deps.kill = async (_id, endReason) => { reasons.push(endReason); return true }
+      const runner = createRetireRunner(w.deps)
+      const views = () => [w.view('p1', 'waiting'), ...(extra.length ? [w.view('s2', 'waiting')] : [])]
+      for (let i = 0; i < 8 && !reasons.length; i++) {
+        await runner.consume(w.snap(views()))
+        w.advance(SUCCESSOR_GRACE_MS)
+      }
+      expect(reasons).toEqual([expected])
+    }
+  })
+
   it('a dead successor cancels the request and kills nothing', async () => {
     const succ: ManagedSession = { id: 's1', harness: 'codex', cwd: '/w', createdAt: new Date(T0).toISOString() }
     const w = world(req({ successorId: 's1' }), [succ])

@@ -272,7 +272,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
               // the race.
               const isIdle = n.code === 'sessions.idle'
               const isWhatsNew = n.code === 'app.whats_new'
-              const isClean = n.code === 'clean.suggestion'
+              const isClean = n.code === 'clean.suggestion' || n.code === 'clean.disk-low' || n.code === 'clean.disk-low-wsl'
               const isJournalFailed = n.meta?.loadingKind === 'journal' && n.meta?.state === 'failed'
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {

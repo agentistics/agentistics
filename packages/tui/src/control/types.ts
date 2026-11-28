@@ -7,7 +7,7 @@
  * lets the whole surface be rewritten without changing a single behaviour.
  */
 
-import type { ActivitySignal, Baseline, CanonicalMode, HarnessId, ProjectKind, SessionConversationLink, SessionMode } from '@agentistics/core'
+import type { ActivitySignal, Baseline, CanonicalMode, HarnessId, KillEndReason, ProjectKind, SessionConversationLink, SessionMode } from '@agentistics/core'
 import type { CliLang } from './lang'
 import type { GithubSection } from './backup'
 import type { SearchFields, SearchScope } from './search-scope'
@@ -1629,7 +1629,7 @@ export interface ControlHost {
   attachSession?(id: string): Promise<AttachTicket | null>
 
   /** `force`: the person confirmed ending a session something live is using (the first press is refused with `held`). */
-  killSession?(id: string, force?: boolean): Promise<ActionResult>
+  killSession?(id: string, force: boolean | undefined, endReason: KillEndReason): Promise<ActionResult>
 
   /**
    * Stop the current turn WITHOUT ending the session.

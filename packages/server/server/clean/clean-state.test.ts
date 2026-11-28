@@ -3,7 +3,7 @@ import { CLEAN_LOG_LIMIT, newCleanScan, scanEstimate, scanLog, wireCleanPlan } f
 import { planClean, type WorktreeFacts } from './clean-plan'
 
 const fact = (overrides: Partial<WorktreeFacts> = {}): WorktreeFacts => ({ repo: '/repo', path: '/repo/.worktrees/finished-name', branch: 'done', isMain: false,
-  missing: false, locked: false, merged: true, pushed: true, dirty: false, lastCommitMs: 1000, lastActivityMs: 2000, sizeBytes: 4096, nodeModulesBytes: 1024, ...overrides })
+  missing: false, locked: false, merged: true, pushed: true, ownerEnded: true, dirty: false, lastCommitMs: 1000, lastActivityMs: 2000, sizeBytes: 4096, nodeModulesBytes: 1024, ...overrides })
 
 describe('live clean state', () => {
   test('starts with honest counters, no ETA and no stale log from another scan', () => {

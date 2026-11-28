@@ -266,6 +266,8 @@ void import('./mem-log').then(m => m.startMemLog())
   void Promise.all([import('./clean/clean-suggest'), import('./cli-lang')])
     .then(async ([m, l]) => m.startCleanSuggestions(AGENTISTICS_DATA_DIR, await l.resolveLang()))
     .catch(() => {})
+  // DISCO.WORKTREES: warn the person and the live leaders when the worktrees' volume is nearly full.
+  void import('./clean/clean-suggest').then(m => m.startDiskCeilingWatch()).catch(() => {})
 }
 void setupFileWatcher()
 // PLAN.LIMITS: wire the notices and the SSE signal, then read the newest records once.
@@ -919,6 +921,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       try {
         const result = await cleanPlanResponse()
         return json(result)
+      } catch (err) { return json({ error: String(err) }, 500) }
+    }
+    if (url.pathname === '/api/clean/disk' && req.method === 'GET') {
+      try {
+        const [{ diskStatus }, { diskDeps }] = await Promise.all([import('./clean/disk-watch'), import('./clean/clean-suggest')])
+        return json(await diskStatus(diskDeps))
       } catch (err) { return json({ error: String(err) }, 500) }
     }
     if (url.pathname === '/api/clean/scan' && req.method === 'GET') return json(cleanScanState())
@@ -3179,7 +3187,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { markCallerVerified } = await import('./sessions/session-roles')
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markCallerVerified(body.value, verifySessionIdentity)
-        const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
+        // A `kill` that arrives here is the person's (or a leader's) own end of the session.
+        const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value, 'final')
         // An account refusal (reopen, group reopen, external continuation) keeps its status.
         const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {

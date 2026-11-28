@@ -163,7 +163,7 @@ export function hostDelegateMembers(lang: () => 'en' | 'pt', ownerHandle?: (id: 
       const r = await (await import('../sessions/task-web')).attachSession(taskId, sessionId, subtaskId ? { subtaskId } : {})
       return r.ok ? { ok: true } : { ok: false, reason: r.reason }
     },
-    kill: async id => { await (await fleet()).runFleetAction(lang(), { id, action: 'kill' }) },
+    kill: async id => { await (await fleet()).runFleetAction(lang(), { id, action: 'kill' }, 'delegation') },
     chat: async id => {
       const f = await fleet()
       const { readSessionChat } = await import('../sessions/chat-web')

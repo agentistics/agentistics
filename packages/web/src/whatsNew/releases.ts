@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [
+      {
+        pt: 'Quando um agente entrega o trabalho e a sessão dele é encerrada, a cópia de trabalho (worktree) já publicada e sem nada pendente é removida sozinha. A branch continua existindo.',
+        en: 'When an agent hands its work back and its session is closed, its working copy (worktree) is removed on its own once merged and with nothing pending. The branch stays.',
+      },
+      {
+        pt: 'Quando o disco está quase cheio, você e as sessões líder recebem um aviso dizendo quanto a limpeza segura liberaria. Nada é apagado sem a sua confirmação.',
+        en: 'When the disk is nearly full, you and the leader sessions get a notice saying how much a safe cleanup would free. Nothing is deleted without your confirmation.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A limpeza agora reconhece trabalho mesclado por um pull request em um commit só. Trabalho publicado mas não mesclado só sai depois de 30 dias parado, com uma cópia dos commits guardada antes.',
+        en: 'Cleanup now recognises work merged by a single squashed pull request. Published but unmerged work goes only after 30 idle days, with a copy of its commits saved first.',
+      },
+      {
+        pt: 'A limpeza mantém por 3 dias o trabalho recém-mesclado, a não ser que a sessão dona já tenha sido encerrada. E, se ela desistir de apagar uma pasta, nada dentro dela é apagado antes.',
+        en: 'Cleanup keeps freshly merged work for 3 days unless the session that owned it has been closed. When it backs off from a folder, nothing inside has been deleted first.',
+      },
+    ],
+  },
   '2.231.0': {
     features: [
       {
