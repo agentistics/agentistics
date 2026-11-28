@@ -2,7 +2,8 @@
  * QA S2b (Opus): adversarial probes of the guard sweep on the REAL stores + the real service tick (the author's harness, copied).
  * Each test LOGS what happened; the expectations state what a correct sweep must do, so a (fail) here is a finding.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +32,9 @@ const subtask = (id: string, extra: Record<string, unknown> = {}) => ({ id, task
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'qa-s2b-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 async function world(rule: 'off' | 'shadow' | 'on', subs: Array<[string, Record<string, unknown>?]> = [['p1']], migrated = true) {
   const clock = { now: T }

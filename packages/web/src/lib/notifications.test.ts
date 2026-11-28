@@ -345,6 +345,37 @@ test('every retirement expiry reason code has translated copy, including multipl
   }
 })
 
+describe('a failed automatic account switch', () => {
+  test('the card has words in both languages, in the viewer\'s language, with the closed reason', async () => {
+    const s = await freshStore()
+    const n = note('af', { code: 'account.auto_failed', meta: { session: 'Líder', harness: 'claude', from: 'A', to: 'B', reason: 'ignored', reasonKind: 'login', outcome: 'kept' } })
+    expect(s.resolveNotification(n, 'pt')).toEqual({ title: 'Troca de conta falhou', message: 'A sessão Líder parou no limite da conta A e a troca para B falhou. O login da conta de destino expirou ou foi recusado: entre nela de novo. Ela continua na conta de antes.' })
+    expect(s.resolveNotification(n, 'en').message).toBe('Session Líder stopped at the limit of account A and the switch to B failed. The login of the target account expired or was refused: sign in to it again. It carries on with its previous account.')
+  })
+
+  test('no id, path or command in any rendered auto-switch card, whatever the stored meta holds', async () => {
+    const s = await freshStore()
+    const codes = ['account.auto_switched', 'account.auto_failed', 'account.auto_deferred', 'account.auto_none', 'account.auto_none_manual']
+    const kinds = ['harness_missing', 'login', 'account_off', 'account_gone', 'accounts_disabled', 'no_conversation', 'unsupported', 'same_account', 'session_gone', 'could_not_end', 'copy', 'start_failed', 'storage', 'unknown', undefined, '/home/x/y.json']
+    for (const lang of ['pt', 'en'] as const) {
+      for (const code of codes) {
+        for (const reasonKind of kinds) {
+          for (const outcome of ['ended', 'kept', 'unsaid']) {
+            // The shape a stored notice may carry: an unnamed session (or an older one that stored its id) and a raw reason.
+            for (const session of ['', 'a1b2c3d4e5']) {
+              const meta = { id: 'f0e1d2c3b4', session, harness: 'claude', from: '', to: '', until: '15:00 UTC', reason: "ENOENT, open '/home/u/x.json'", ...(reasonKind ? { reasonKind } : {}), outcome }
+              const message = s.resolveNotification(note('x', { code, meta }), lang).message!
+              expect(message).not.toMatch(/a1b2c3d4e5|f0e1d2c3b4|\/home|ENOENT|\.json|undefined|\{\w+\}/)
+              expect(message).toContain(lang === 'pt' ? 'Uma sessão do Claude Code' : 'A Claude Code session')
+              expect(/Reabrir|Reopen/.test(message)).toBe(code === 'account.auto_failed' && outcome === 'ended')
+            }
+          }
+        }
+      }
+    }
+  })
+})
+
 describe('cleanup completion wording', () => {
   test('uses real plurals and omits empty categories in both languages', async () => {
     const s = await freshStore()

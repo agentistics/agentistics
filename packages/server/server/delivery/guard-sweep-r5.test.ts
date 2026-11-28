@@ -1,5 +1,6 @@
 /** S2b r4: the live re-QA r3 findings (R3-1..R3-6). Harness copied from guard-sweep-r3.test.ts. */
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,7 +30,9 @@ const subtask = (id: string, extra: Record<string, unknown> = {}) => ({ id, task
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'qa-s2b-r4-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 async function world(subs: Array<[string, Record<string, unknown>?]> = [['p1']], quiet = 40) {
   const clock = { now: T }

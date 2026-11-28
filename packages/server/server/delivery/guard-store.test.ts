@@ -5,7 +5,8 @@
  *
  * Every NEGATIVE asserts the exact code AND that tasks.json and deliveries.json are byte-identical after the attempt.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +29,9 @@ import { flowContext, unattributedContext } from './guard'
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'guard-store-')); forgetClassifyCache() })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 const ISO = '2026-11-13T09:00:00.000Z'
 const ctx: GuardContext = { principal: { kind: 'unattributed' } }

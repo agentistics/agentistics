@@ -1,5 +1,6 @@
 /** S2b.1: the LOW reservations B1..B6 of the r6 re-QA (qa-eg-s2b-r6-sonnet.md); GAP-M1/GAP-M2 ported from the QA's own probes. */
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -33,7 +34,9 @@ const subtask = (id: string, extra: Record<string, unknown> = {}) => ({ id, task
 const hook: { wrap?: (t: TaskStore) => TaskStore } = {}
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'eg-s2b-1-')) })
-afterEach(() => { hook.wrap = undefined; rmSync(root, { recursive: true, force: true }) })
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); hook.wrap = undefined; rmSync(root, { recursive: true, force: true }) })
 
 async function world(subs: Array<[string, Record<string, unknown>?]> = [['p1']], quiet = 40) {
   const clock = { now: T }

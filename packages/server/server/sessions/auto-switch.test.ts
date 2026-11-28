@@ -173,7 +173,21 @@ describe('QA fixes in the policy', () => {
   })
 })
 
-/** The plan-limits rows this machine served on 2026-11-27 (CONTA.AUTO-TROCA-REAL), trimmed to what the policy reads. */
+describe('an expired login (HOTFIX.LOGIN-EXPIRADO) on the move path', () => {
+  const budgets = [row('a', { fiveHourPct: 100 }), row('b'), row('c', { fiveHourPct: 90 })]
+  test('room in the budget and offered by the switch, but its login was refused: never the target', () => {
+    expect(decideAutoSwitch(base({ budgets }))).toMatchObject({ kind: 'move', target: { id: 'b' } }) // control: b is the pick
+    expect(decideAutoSwitch(base({ budgets, expired: new Set(['b']) })).kind).toBe('none')
+  })
+  test('the other accounts stay candidates', () => {
+    expect(decideAutoSwitch(base({ budgets: [row('a', { fiveHourPct: 100 }), row('b'), row('c', { fiveHourPct: 50 })], expired: new Set(['b']) }))).toMatchObject({ kind: 'move', target: { id: 'c' } })
+  })
+})
+
+/**
+ * A RECONSTRUCTION of the shape of this machine's plan-limits on 2026-11-27 (CONTA.AUTO-TROCA-REAL), not a copy of what
+ * it served: no historical budget snapshot exists. In the read of that day only Nayara came with a MEASURED slot count.
+ */
 const real = (o: Partial<Record<'nayara' | 'principal' | 'vini', Partial<AccountBudget> & { agentUse?: unknown }>> = {}): AccountBudget[] => [
   row('principal', { plan: 'Claude Max 5x', fiveHourPct: 100, weekPct: 17, status: 'hold', freeSlots: 0, freeSlotsMeasured: true, agentUse: { reason: 'override-on', on: true, enabled: true, override: true }, ...o.principal } as never),
   row('nayara', { plan: 'Claude Pro', fiveHourPct: 70, weekPct: 60, weekResetsAt: NOW + 1.06 * 86_400_000, daysToWeekReset: 1.06, paceStatus: 'over', freeSlots: 0, freeSlotsMeasured: true, agentUse: { reason: 'in-window', on: true, enabled: true, override: false }, ...o.nayara } as never),
@@ -186,7 +200,8 @@ describe('CONTA.AUTO-TROCA-REAL — the real machine\'s shape', () => {
     expect(decideAutoSwitch(realInput(real()))).toMatchObject({ kind: 'move', target: { id: 'nayara' }, episode: { account: 'nayara', tried: ['principal'] } })
   })
   test('schedule closed and no override: never a target, even with room', () => {
-    const closed = { agentUse: { reason: 'agenda-off', on: false, enabled: true, override: false } }
+    // Free slots and a healthy pace, so the schedule is the ONLY reason left: the pre-fix code (no agentUse rule) moved here.
+    const closed = { agentUse: { reason: 'agenda-off', on: false, enabled: true, override: false }, freeSlots: 2, paceStatus: 'on' as const }
     expect(decideAutoSwitch(realInput(real({ nayara: closed }))).kind).toBe('none')
   })
   test('override on: a candidate outside its schedule', () => {

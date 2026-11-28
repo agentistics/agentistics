@@ -31,7 +31,7 @@
  * slots left after the live sessions' MEASURED burn); an account measured to have none is out. A MOVE (`{ move: true }`)
  * is judged on the account's own windows and its agent switch only, for the reason in step 5.
  */
-import { pickAccount, type AccountBudget, type HarnessId } from '@agentistics/core'
+import { accountName, noticeSubject, pickAccount, switchFailureSentence, type AccountBudget, type HarnessId, type SwitchFailureKind, type SwitchOutcome } from '@agentistics/core'
 import type { SwitchOption } from './account-switch'
 
 export const AUTO_MIN_RESET_MS = 10 * 60_000
@@ -59,6 +59,8 @@ export interface AutoEpisode {
   resumeAt?: number
   /** The single resume was sent. */
   resumedAt?: number
+  /** The last switch that FAILED in this episode, with the reason it gave: kept because a server log rotates. */
+  failure?: { target: string; message: string; at: number }
 }
 
 export interface AutoInput {
@@ -167,6 +169,8 @@ export function decideAutoSwitch(i: AutoInput): AutoDecision {
   // Nobody has room: stay, and (reset known) resume the session ONCE when its window opens.
   const episode: AutoEpisode = {
     account: current, tried: [...tried], handled: true, at: i.now,
+    // The failed switch's own words outlive the tick that runs out of targets: it is the only durable record of them.
+    ...(ep?.failure ? { failure: ep.failure } : {}),
     ...(i.limit.at !== undefined ? { seenAt: i.limit.at } : {}),
     ...(resetsAt !== undefined ? { resumeAt: resetsAt + RESUME_AFTER_RESET_MS } : {}),
   }
@@ -194,27 +198,36 @@ export interface AutoWords { title: string; message: string; comment?: string }
  * The notice (and, for a move, the board comment) — `from`/`to` are account labels. A "none" notice promises only what the
  * policy does: with a known reset the session is resumed once (reset + 1 min); without one it says nobody can tell when.
  */
-export function autoSwitchWords(o: { kind: 'move' | 'none' | 'deferred'; lang: 'en' | 'pt'; session: string; from: string; to?: string; resetsAt?: number; tz?: string }): AutoWords {
+export function autoSwitchWords(o: { kind: 'move' | 'none' | 'deferred' | 'failed'; lang: 'en' | 'pt'; /** The session's NAME, empty when nobody named it (never an id). */ session: string; harness?: string; from: string; to?: string; resetsAt?: number; tz?: string; /** `failed`: which sentence, and what became of the session. Raw error text never comes here. */ failure?: { kind: SwitchFailureKind; outcome: SwitchOutcome } }): AutoWords {
   const pt = o.lang === 'pt'
   const until = clock(o.resetsAt, o.lang, o.tz)
+  const who = noticeSubject(o.lang, o.session, o.harness)
+  const from = accountName(o.lang, o.from)
+  const to = accountName(o.lang, o.to)
+  if (o.kind === 'failed') {
+    const reason = switchFailureSentence(o.lang, o.failure?.kind, o.failure?.outcome)
+    return pt
+      ? { title: 'Troca de conta falhou', message: `${who} parou no limite da conta ${from} e a troca para ${to} falhou. ${reason}`, comment: `Troca de conta de ${from} para ${to} falhou: ${reason}` }
+      : { title: 'Account switch failed', message: `${who} stopped at the limit of account ${from} and the switch to ${to} failed. ${reason}`, comment: `Account switch from ${from} to ${to} failed: ${reason}` }
+  }
   if (o.kind === 'move') {
     return pt
-      ? { title: 'Conta trocada', message: `A sessão ${o.session} parou no limite da conta ${o.from} (volta às ${until}) e continua na conta ${o.to}, de onde parou.`, comment: `Conta trocada de ${o.from} para ${o.to}: limite até ${until}` }
-      : { title: 'Account switched', message: `Session ${o.session} stopped at the limit of account ${o.from} (back at ${until}) and carries on with account ${o.to}, where it left off.`, comment: `Account switched from ${o.from} to ${o.to}: limit until ${until}` }
+      ? { title: 'Conta trocada', message: `${who} parou no limite da conta ${from} (volta às ${until}) e continua na conta ${to}, de onde parou.`, comment: `Conta trocada de ${from} para ${to}: limite até ${until}` }
+      : { title: 'Account switched', message: `${who} stopped at the limit of account ${from} (back at ${until}) and carries on with account ${to}, where it left off.`, comment: `Account switched from ${from} to ${to}: limit until ${until}` }
   }
   if (o.kind === 'deferred') {
     return pt
-      ? { title: 'Troca de conta adiada', message: `A sessão ${o.session} está no limite da conta ${o.from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.` }
-      : { title: 'Account switch deferred', message: `Session ${o.session} is at the limit of account ${o.from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.` }
+      ? { title: 'Troca de conta adiada', message: `${who} está no limite da conta ${from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.` }
+      : { title: 'Account switch deferred', message: `${who} is at the limit of account ${from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.` }
   }
   if (o.resetsAt === undefined) {
     return pt
-      ? { title: 'Sessão parada no limite', message: `A sessão ${o.session} parou no limite da conta ${o.from} e nenhuma outra conta tem folga agora. Não há previsão de quando a conta volta: ela só continua quando você mandar uma mensagem.` }
-      : { title: 'Session stopped at the limit', message: `Session ${o.session} stopped at the limit of account ${o.from} and no other account has room right now. There is no sign of when the account comes back: it only carries on when you send it a message.` }
+      ? { title: 'Sessão parada no limite', message: `${who} parou no limite da conta ${from} e nenhuma outra conta tem folga agora. Não há previsão de quando a conta volta: ela só continua quando você mandar uma mensagem.` }
+      : { title: 'Session stopped at the limit', message: `${who} stopped at the limit of account ${from} and no other account has room right now. There is no sign of when the account comes back: it only carries on when you send it a message.` }
   }
   return pt
-    ? { title: 'Sessão parada no limite', message: `A sessão ${o.session} parou no limite da conta ${o.from} e nenhuma outra conta tem folga agora. A janela abre às ${until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.` }
-    : { title: 'Session stopped at the limit', message: `Session ${o.session} stopped at the limit of account ${o.from} and no other account has room right now. The window opens at ${until}; a minute later agentistics re-sends the last message, once.` }
+    ? { title: 'Sessão parada no limite', message: `${who} parou no limite da conta ${from} e nenhuma outra conta tem folga agora. A janela abre às ${until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.` }
+    : { title: 'Session stopped at the limit', message: `${who} stopped at the limit of account ${from} and no other account has room right now. The window opens at ${until}; a minute later agentistics re-sends the last message, once.` }
 }
 
 // ── The hand-off's account (B) ─────────────────────────────────────────────────────────────────────────

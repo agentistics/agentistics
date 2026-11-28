@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { accountName, noticeSubject, switchFailureSentence } from '@agentistics/core'
 import { refusalSentence } from './ownerProof'
 import { liveDeepLink } from './liveDeepLink'
 import { idleSessionNoun } from './idleExecution'
@@ -73,20 +74,24 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Piece has no session', message: 'No session is filed on this piece, so the board cannot mark it done. Archive it, or open the task and file the conversation that delivered it.' },
   },
   'account.auto_switched': {
-    pt: { title: 'Conta trocada', message: 'A sessão {session} parou no limite da conta {from} (volta às {until}) e continua na conta {to}, de onde parou.' },
-    en: { title: 'Account switched', message: 'Session {session} stopped at the limit of account {from} (back at {until}) and carries on with account {to}, where it left off.' },
+    pt: { title: 'Conta trocada', message: '{who} parou no limite da conta {from} (volta às {until}) e continua na conta {to}, de onde parou.' },
+    en: { title: 'Account switched', message: '{who} stopped at the limit of account {from} (back at {until}) and carries on with account {to}, where it left off.' },
+  },
+  'account.auto_failed': {
+    pt: { title: 'Troca de conta falhou', message: '{who} parou no limite da conta {from} e a troca para {to} falhou. {reason}' },
+    en: { title: 'Account switch failed', message: '{who} stopped at the limit of account {from} and the switch to {to} failed. {reason}' },
   },
   'account.auto_deferred': {
-    pt: { title: 'Troca de conta adiada', message: 'A sessão {session} está no limite da conta {from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.' },
-    en: { title: 'Account switch deferred', message: 'Session {session} is at the limit of account {from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.' },
+    pt: { title: 'Troca de conta adiada', message: '{who} está no limite da conta {from}, mas ela está em uso agora: a troca de conta espera terminar, para não cortar o que a usa.' },
+    en: { title: 'Account switch deferred', message: '{who} is at the limit of account {from}, but it is in use right now: the account switch waits until that ends, so nothing in use is cut off.' },
   },
   'account.auto_none': {
-    pt: { title: 'Sessão parada no limite', message: 'A sessão {session} parou no limite da conta {from} e nenhuma outra conta tem folga agora. A janela abre às {until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.' },
-    en: { title: 'Session stopped at the limit', message: 'Session {session} stopped at the limit of account {from} and no other account has room right now. The window opens at {until}; a minute later agentistics re-sends the last message, once.' },
+    pt: { title: 'Sessão parada no limite', message: '{who} parou no limite da conta {from} e nenhuma outra conta tem folga agora. A janela abre às {until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.' },
+    en: { title: 'Session stopped at the limit', message: '{who} stopped at the limit of account {from} and no other account has room right now. The window opens at {until}; a minute later agentistics re-sends the last message, once.' },
   },
   'account.auto_none_manual': {
-    pt: { title: 'Sessão parada no limite', message: 'A sessão {session} parou no limite da conta {from} e nenhuma outra conta tem folga agora. Não há previsão de quando a conta volta: ela só continua quando você mandar uma mensagem.' },
-    en: { title: 'Session stopped at the limit', message: 'Session {session} stopped at the limit of account {from} and no other account has room right now. There is no sign of when the account comes back: it only carries on when you send it a message.' },
+    pt: { title: 'Sessão parada no limite', message: '{who} parou no limite da conta {from} e nenhuma outra conta tem folga agora. Não há previsão de quando a conta volta: ela só continua quando você mandar uma mensagem.' },
+    en: { title: 'Session stopped at the limit', message: '{who} stopped at the limit of account {from} and no other account has room right now. There is no sign of when the account comes back: it only carries on when you send it a message.' },
   },
   'account.handoff_no_room': {
     pt: { title: 'Passagem sem conta com folga', message: 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' },
@@ -585,6 +590,21 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     message = message.replace('{reason}', reasons.map(code => RETIRE_REASON_TEXT[String(code)]?.[lang] ?? fallback).join('; '))
   }
 
+  // account.auto_*: composed here so the viewer's language wins, and so a stored notice can never print an id or a raw
+  // error (an unnamed session or account is said in words; the reason is one of the closed sentences).
+  let values = n.meta
+  if (message && n.code?.startsWith('account.auto_')) {
+    const str = (k: string) => typeof n.meta?.[k] === 'string' ? n.meta[k] as string : ''
+    const session = str('session')
+    values = {
+      ...n.meta,
+      who: noticeSubject(lang, session === str('id') || /^(?:[0-9a-f]{10,}|[0-9a-f-]{36})$/i.test(session) ? '' : session, str('harness') || undefined),
+      from: accountName(lang, str('from')),
+      to: accountName(lang, str('to')),
+      reason: switchFailureSentence(lang, str('reasonKind'), str('outcome')),
+    }
+  }
+
   // EVERY remaining {placeholder}, from `meta` under the same name.
   //
   // The cases above are the ones that TRANSFORM their value — a `v` prefix, a fallback noun when
@@ -596,8 +616,8 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   // A placeholder with NO value in `meta` is LEFT ALONE rather than replaced: printing the word
   // `undefined` inside a sentence a person reads is worse than a visible brace, because it looks
   // like the value.
-  if (message && n.meta) {
-    const meta = n.meta
+  if (message && values) {
+    const meta = values
     message = message.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (whole, key: string) => {
       const v = meta[key]
       return v === undefined || v === null ? whole : String(v)
