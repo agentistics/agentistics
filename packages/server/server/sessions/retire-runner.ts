@@ -34,7 +34,7 @@ export interface RetireRunnerDeps {
   readRegistry(): Promise<ManagedSession[]>
   patch(id: string, patch: SessionPatch): Promise<boolean>
   /** `backend.kill` — true when the backend confirms the pane is gone. */
-  kill(id: string): Promise<boolean>
+  kill(id: string, endReason: 'final' | 'handoff'): Promise<boolean>
   /** A hub poll that starts after this call; never a cached activity read. */
   readFresh(): Promise<SessionSnapshot>
   /** Marks the row ended (`registry.retireSession`). */
@@ -135,7 +135,8 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
         } else if (!missingPastGrace(fresh, req, snap.polledAtMs) ||
           !confirm(missingRows, row.id, snap.polledAtMs)) return
       }
-      if (decision.kill && !(await d.kill(row.id))) {
+      // A retire with a successor is a hand-off (the successor works in the same directory), never a final end.
+      if (decision.kill && !(await d.kill(row.id, req.successorId ? 'handoff' : 'final'))) {
         log(`[retire] could not confirm ${row.id} was killed — the request is kept`)
         return
       }
@@ -353,7 +354,7 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
       readRegistry: reg.readRegistry,
       patch: reg.patchSession,
       // A hold that starts after the runner's own check is stopped by the guard inside the kill: the request is kept, never expired.
-      kill: id => reg.killAndRetireSession(id, () => backend.kill(id)).catch(e => { if (e instanceof reg.HoldError) return false; throw e }),
+      kill: (id, endReason) => reg.killAndRetireSession(id, () => backend.kill(id), undefined, { endReason }).catch(e => { if (e instanceof reg.HoldError) return false; throw e }),
       readFresh: () => hub.refresh(),
       markEnded: id => reg.retireSession(id),
       fileInFolder: (f, row) => fileInFolder(f, row),

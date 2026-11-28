@@ -4,11 +4,14 @@
  * dirty tree) or deletes exactly `<worktree>/node_modules`; nothing else is ever deleted.
  */
 import { hostWhich } from '../host-which'
-import { existsSync, lstatSync, readdirSync, readlinkSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import type { CleanItem, WorktreeFacts } from './clean-plan'
-import { MANAGED_SESSIONS_FILE } from '../config'
+import { ARCHIVE_DIR, MANAGED_SESSIONS_FILE } from '../config'
+import { createMergedPrReader, type MergedPrCache, type MergedPrReader } from './merged-prs'
+import { fmtBytes, planClean } from './clean-plan'
+import { durableWrite } from '../durable-file'
 import { CLEAN_HOUR_MS, CLEAN_LOCK, CLEAN_POLL_MS, removalWait, waitForCleanHealth, type CleanHealth } from './clean-pace'
 import { throttledRemove as removeBatches } from './throttled-remove'
 
@@ -28,6 +31,12 @@ export interface CleanIoOpts {
   registryFile?: string
   /** Test seam: the process cwd reader. */
   processCwds?: () => CwdReading
+  /** Only inspect this worktree (a path as git lists it); the others are not walked. */
+  only?: string
+  /** Merged pull requests per repository; production asks `gh` (cached a day). */
+  mergedPrs?: MergedPrReader
+  /** Where patches of unmerged commits are saved before removal. */
+  patchDir?: string
   /** A sentence the caller should show: a source of "in use" could not be read. */
   onWarning?: (message: string) => void
   /** Cleanup dependencies: production samples G1; tests supply a clock and throwaway lock. */
@@ -117,6 +126,23 @@ async function run(argv: string[], o: CleanIoOpts & { cwd?: string; lease?: () =
 }
 const git = (args: string[], o: CleanIoOpts) => run(['git', ...args], o)
 
+const PR_CACHE_FILE = join(dirname(MANAGED_SESSIONS_FILE), 'clean-merged-prs.json')
+/** `gh` for one GitHub repository (null: no gh, not signed in, no GitHub origin, or any failure). */
+const readMergedPrs: MergedPrReader = createMergedPrReader({
+  async run(repo) {
+    const gh = hostWhich('gh')
+    if (!gh) return null
+    const remote = await git(['-C', repo, 'remote', 'get-url', 'origin'], {})
+    if (remote.code !== 0 || !remote.out.includes('github')) return null
+    const r = await run([gh, 'pr', 'list', '--state', 'merged', '--limit', '1000', '--json', 'headRefName,headRefOid'], { cwd: repo, timeoutMs: 20_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' } })
+    return r.code === 0 ? r.out : null
+  },
+  async load() {
+    try { const v: unknown = JSON.parse(await readFile(PR_CACHE_FILE, 'utf8')); return v && typeof v === 'object' ? v as MergedPrCache : {} } catch { return {} }
+  },
+  save: cache => durableWrite(PR_CACHE_FILE, JSON.stringify(cache), 0o600),
+})
+
 /** The repository (its common dir's parent: the main checkout) a path belongs to, or null. */
 export async function repoOf(path: string, o: CleanIoOpts = {}): Promise<string | null> {
   if (!existsSync(path)) return null
@@ -174,7 +200,7 @@ async function defaultRef(repo: string, o: CleanIoOpts): Promise<string | null> 
 }
 
 /** What a reader could say about "who is sitting where": `known: false` means it could not tell at all. */
-export interface CwdReading { cwds: string[]; known: boolean }
+export interface CwdReading { cwds: string[]; known: boolean; /** cwds of managed sessions that ended for good. */ ended?: string[] }
 
 /**
  * Directories the live processes of this machine are sitting in. Linux reads /proc; elsewhere `lsof`
@@ -222,8 +248,8 @@ export async function managedReading(o: CleanIoOpts): Promise<CwdReading> {
   try {
     const parsed: unknown = JSON.parse(text)
     if (!Array.isArray(parsed)) return { cwds: [], known: false }
-    const rows = parsed.filter((r): r is { cwd: string; endedAt?: string } => !!r && typeof r === 'object' && typeof (r as { cwd?: unknown }).cwd === 'string')
-    return { cwds: openSessionCwds(rows), known: true }
+    const rows = parsed.filter((r): r is { cwd: string; endedAt?: string; endReason?: string } => !!r && typeof r === 'object' && typeof (r as { cwd?: unknown }).cwd === 'string')
+    return { cwds: openSessionCwds(rows), known: true, ended: finalEndedCwds(rows) }
   } catch { return { cwds: [], known: false } }
 }
 
@@ -231,7 +257,7 @@ export async function managedReading(o: CleanIoOpts): Promise<CwdReading> {
 export async function useReading(o: CleanIoOpts): Promise<CwdReading> {
   const live = (o.processCwds ?? liveCwds)()
   const managed = await managedReading(o)
-  return { cwds: [...live.cwds, ...managed.cwds], known: live.known && managed.known }
+  return { cwds: [...live.cwds, ...managed.cwds], known: live.known && managed.known, ...(managed.ended ? { ended: managed.ended } : {}) }
 }
 
 /** Ignored paths an install or build brings back; anything else ignored (`.env.local`, `*.secret`) is the user's. */
@@ -261,6 +287,11 @@ export function openSessionCwds(rows: ReadonlyArray<{ cwd: string; endedAt?: str
   return rows.filter(r => !r.endedAt && r.cwd).map(r => resolve(r.cwd))
 }
 
+/** cwds of managed sessions a person or leader ended for good (the owner of that worktree is gone). Pure; exported for tests. */
+export function finalEndedCwds(rows: ReadonlyArray<{ cwd: string; endedAt?: string; endReason?: string }>): string[] {
+  return rows.filter(r => !!r.endedAt && r.endReason === 'final' && r.cwd).map(r => resolve(r.cwd))
+}
+
 /** A live process has its cwd at or below `path`. Pure; exported for tests. */
 export function cwdInside(path: string, cwds: readonly string[]): boolean {
   const p = resolve(path)
@@ -272,8 +303,12 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   const list = await git(['-C', repo, 'worktree', 'list', '--porcelain'], o)
   if (list.code !== 0) return []
   const base = await defaultRef(repo, o)
-  const blocks = list.out.split('\n\n').filter(Boolean)
-  const allPaths = blocks.map(b => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)).filter((p): p is string => !!p).map(p => resolve(p))
+  const listed = list.out.split('\n\n').filter(Boolean)
+  const pathOf = (b: string) => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)
+  const allPaths = listed.map(pathOf).filter((p): p is string => !!p).map(p => resolve(p))
+  const only = o.only ? resolve(o.only) : null
+  const blocks = only ? listed.filter(b => { const p = pathOf(b); return !!p && resolve(p) === only }) : listed
+  const prs = blocks.length ? await (o.mergedPrs ?? readMergedPrs)(repo).catch(() => null) : null
   o.onDiscover?.(blocks.length)
   const use = await useReading(o)
   if (!use.known) o.onWarning?.('Could not read the process list or the session registry: worktrees are kept because it is unknown whether they are in use.')
@@ -292,6 +327,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
     const missing = lines.some(l => l.startsWith('prunable')) || !existsSync(path)
     const locked = lines.some(l => l.startsWith('locked'))
     let merged = false, pushed = false, squashed = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false, keepsIgnored = false
+    let prHead: string | undefined
     if (!missing) {
       if (base && headSha) merged = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, base], o)).code === 0
       if (branch && headSha) pushed = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, `refs/remotes/origin/${branch}`], o)).code === 0
@@ -303,6 +339,12 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
           squashed = c.code === 0 && marks.length > 0 && marks.every(l => l.startsWith('-'))
         }
       }
+      // A merged PR holding HEAD: a squash merge of several commits leaves no other trace.
+      if (branch && headSha) {
+        for (const pr of prs?.filter(p => p.branch === branch) ?? []) {
+          if ((await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, pr.oid], o)).code === 0) { prHead = pr.oid; break }
+        }
+      }
       const tree = await treeState(path, o)
       dirty = tree.dirty; keepsIgnored = tree.keepsIgnored
       const lc = await git(['-C', path, 'log', '-1', '--format=%ct'], o)
@@ -312,7 +354,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
       sizeBytes = disk.bytes; nodeModulesBytes = disk.nodeModulesBytes; sizeUnknown = disk.unknown
       lastActivityMs = Math.max(disk.mtimeMs ?? 0, lastCommitMs ?? 0) || null
     }
-    out[index] = { repo, path, branch, isMain, missing, locked, merged, pushed, squashed, inUse: cwdInside(path, cwds), ...(use.known ? {} : { useUnknown: true }), ...(keepsIgnored ? { keepsIgnored } : {}), dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
+    out[index] = { repo, path, branch, isMain, missing, locked, merged, pushed, squashed, ...(prHead ? { prMerged: true, prHead } : {}), inUse:cwdInside(path, cwds), ...(use.known ? {} : { useUnknown: true }), ...(use.ended?.includes(resolve(path)) ? { ownerEnded: true } : {}), ...(keepsIgnored ? { keepsIgnored } : {}), dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
     o.onItem?.(out[index]!)
   }
   await Promise.all(Array.from({ length: Math.min(WORKTREE_POOL_SIZE, blocks.length) }, async () => {
@@ -326,7 +368,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
 }
 
 /** Why a worktree must not be touched NOW (in use, unknown, dirty, non-regenerable ignored files), or null. */
-async function changedSince(path: string, o: CleanIoOpts, removing: boolean): Promise<string | null> {
+async function changedSince(path: string, o: CleanIoOpts, removing: boolean, prHead?: string): Promise<string | null> {
   const use = await useReading(o)
   if (cwdInside(path, use.cwds)) return 'it is in use now'
   if (!use.known) return 'it is unknown whether it is in use (process list or session registry unreadable)'
@@ -337,8 +379,20 @@ async function changedSince(path: string, o: CleanIoOpts, removing: boolean): Pr
   const branch = await git(['-C', path, 'symbolic-ref', '-q', '--short', 'HEAD'], o)
   if (branch.code !== 0 || !branch.out.trim()) return 'detached HEAD is not a pushed branch'
   const pushed = await git(['-C', path, 'merge-base', '--is-ancestor', 'HEAD', `refs/remotes/origin/${branch.out.trim()}`], o)
-  if (pushed.code !== 0) return 'HEAD is not committed and pushed to origin on this branch'
+  // The branch may be gone from origin after the merge: a merged pull request holding HEAD is as published.
+  const inPr = !!prHead && (await git(['-C', path, 'merge-base', '--is-ancestor', 'HEAD', prHead], o)).code === 0
+  if (pushed.code !== 0 && !inPr) return 'HEAD is not committed and pushed to origin on this branch'
   return null
+}
+
+/** Save the commits only this branch has, as patches, before an unmerged worktree is removed. */
+async function savePatches(f: WorktreeFacts, o: CleanIoOpts): Promise<boolean> {
+  const base = await defaultRef(f.repo, o)
+  if (!base) return false
+  const day = new Date(o.cleanup?.now?.() ?? Date.now()).toISOString().slice(0, 10)
+  const dir = join(o.patchDir ?? join(ARCHIVE_DIR, 'worktree-patches'), basename(f.repo), `${basename(f.path)}-${day}`)
+  try { mkdirSync(dir, { recursive: true, mode: 0o700 }) } catch { return false }
+  return (await git(['-C', f.path, 'format-patch', '-q', '-o', dir, `${base}..HEAD`], o)).code === 0
 }
 
 /** A kernel flock, shared by CLI, web and the C2 host seam. Failure to lock fails closed. */
@@ -433,17 +487,24 @@ export async function throttledRemove(item: CleanItem, o: CleanIoOpts = {}): Pro
   return withCleanupLock(async () => {
     if (f.isMain || f.locked || f.missing) return `${f.path}: skipped, main, locked or missing worktree`
     const io = cleanupIo(o)
-    const before = await changedSince(f.path, o, a.kind === 'remove')
+    const before = await changedSince(f.path, o, a.kind === 'remove', f.prHead)
     if (before) return `${f.path}: skipped, ${before}`
     if (a.kind === 'remove') await waitForRemoval(o, io)
     else await waitForIdle(o, io)
     // Waiting may take hours: repeat the safety check after every admission wait.
-    const after = await changedSince(f.path, o, a.kind === 'remove')
+    const after = await changedSince(f.path, o, a.kind === 'remove', f.prHead)
     if (after) return `${f.path}: skipped, ${after}`
+    // Fail closed: no saved patch, no removal.
+    if (a.kind === 'remove' && a.savePatch && !(await savePatches(f, o))) return `${f.path}: skipped, its patch could not be saved`
+    if (a.kind === 'remove') await waitForIdle(o, io)
+    // The last look BEFORE anything is deleted: a refusal here leaves node_modules too.
+    const final = await changedSince(f.path, o, a.kind === 'remove', f.prHead)
+    if (final) return `${f.path}: skipped, ${final}`
     await removeBatches(join(f.path, 'node_modules'), io)
     if (a.kind === 'remove') {
+      // Removing dependencies takes a while: look once more before git takes the tree.
       await waitForIdle(o, io)
-      const why = await changedSince(f.path, o, true)
+      const why = await changedSince(f.path, o, true, f.prHead)
       if (why) return `${f.path}: skipped, ${why}`
       // No --force: git refuses a tree that changed since it was listed.
       const r = await git(['-C', f.repo, 'worktree', 'remove', f.path], { ...o, lowPriority: true })
@@ -474,4 +535,64 @@ export async function applyClean(items: readonly CleanItem[], o: CleanIoOpts = {
     } catch (e) { if (o.signal?.aborted) throw e; problems.push(`${f.path}: ${String(e)}`) }
   }
   return problems
+}
+
+// ─── DISCO.WORKTREES: a worker's worktree goes when the worker does ─────────────────────────────
+
+export interface HandoffSession { id: string; cwd: string; taskId?: string }
+
+export interface HandoffDeps {
+  /** The session left a hand-back on the board. */
+  handedBack(session: HandoffSession): Promise<boolean>
+  /** Record what happened on the task (best effort). */
+  note?(session: HandoffSession, text: string): Promise<void>
+  io?: CleanIoOpts
+}
+
+export interface HandoffResult { removed: boolean; why: string }
+
+/**
+ * A closed session that handed back loses the worktree it was STARTED in when that worktree is merged
+ * and clean: nothing uncommitted, nothing ignored that cannot be regenerated, nobody else inside.
+ * Every doubt keeps it; branches stay; the idle (patch-first) path is never taken automatically.
+ */
+export async function cleanAfterHandback(session: HandoffSession, d: HandoffDeps): Promise<HandoffResult> {
+  const kept = (why: string): HandoffResult => ({ removed: false, why })
+  if (!session.cwd || !(await d.handedBack(session))) return kept('no hand-back from this session')
+  const io: CleanIoOpts = { lowPriority: true, ...d.io }
+  const cwd = resolve(session.cwd)
+  const repo = await repoOf(cwd, io)
+  if (!repo || resolve(repo) === cwd) return kept('not a linked worktree')
+  // `only` matches the worktree ROOT: a session started in a subdirectory does not own the worktree.
+  const [facts] = await worktreeFacts(repo, { ...io, only: cwd })
+  if (!facts) return kept('not a worktree root')
+  // The caller IS the owner's final end, so the age floor does not apply (the registry row may not be read yet).
+  const item = planClean([{ ...facts, ownerEnded: true }], Date.now())[0]!
+  const a = item.action
+  if (a.kind !== 'remove' || a.savePatch) return kept(a.kind === 'keep' ? a.reason : 'not merged')
+  const problems = await applyClean([item], io)
+  if (problems.length) return kept(problems.join('; '))
+  await d.note?.(session, `Worktree ${basename(cwd)} (merged, clean) removed after the hand-back; ${fmtBytes(a.frees)} freed. The branch is kept.`).catch(() => {})
+  return { removed: true, why: 'merged and clean' }
+}
+
+/** Processes of the closed session may still be unwinding; look after they have. */
+export const HANDOFF_DELAY_MS = 20_000
+
+/** Server wiring: called after a session is killed. Never throws, never delays the kill. */
+export function scheduleHandoffCleanup(session: HandoffSession, log: (line: string) => void = console.log): void {
+  setTimeout(() => {
+    void (async () => {
+      const { openTaskStore } = await import('../sessions/task-source')
+      const result = await cleanAfterHandback(session, {
+        handedBack: async s => (await openTaskStore().read()).comments.some(c => c.kind === 'handback' && c.sessionId === s.id),
+        note: async (s, body) => {
+          if (!s.taskId) return
+          const { addComment } = await import('../sessions/task-web')
+          await addComment(s.taskId, { author: 'agentop', body })
+        },
+      })
+      if (result.removed) log(`[clean] removed the worktree of closed session ${session.id} (${session.cwd})`)
+    })().catch(e => log(`[clean] hand-back cleanup failed for ${session.id}: ${String(e)}`))
+  }, HANDOFF_DELAY_MS).unref?.()
 }

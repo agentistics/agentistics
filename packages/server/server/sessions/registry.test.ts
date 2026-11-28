@@ -7,7 +7,7 @@ import { planCrashGroup } from './crash-group'
 import type { KillOptions } from './registry'
 import { HoldError } from './hold-guard'
 
-const noHold: KillOptions = { observe: async () => ({ state: 'none' }) }
+const noHold: KillOptions = { endReason: 'final', scheduleCleanup: () => {}, observe: async () => ({ state: 'none' }) }
 
 let dir = ''
 let file = ''
@@ -58,7 +58,7 @@ describe('createSessionRegistry', () => {
   })
 
   describe('one hold guard behind every kill', () => {
-    const held: KillOptions = { observe: async () => ({ state: 'held', since: Date.now() - 60_000, sentence: { en: 'engine words', pt: 'palavras do engine' } }) }
+    const held: KillOptions = { endReason: 'final', observe: async () => ({ state: 'held', since: Date.now() - 60_000, sentence: { en: 'engine words', pt: 'palavras do engine' } }) }
     it('a held session is NOT killed: nothing is called, nothing is recorded as ended', async () => {
       const reg = createSessionRegistry(file)
       await reg.add(session('busy'))
@@ -70,7 +70,7 @@ describe('createSessionRegistry', () => {
     it('a hold that cannot be read is held too (unknown is not free to kill)', async () => {
       const reg = createSessionRegistry(file)
       await reg.add(session('maybe'))
-      await expect(killAndRetireSession('maybe', async () => true, reg, { observe: async () => ({ state: 'unknown' }) })).rejects.toBeInstanceOf(HoldError)
+      await expect(killAndRetireSession('maybe', async () => true, reg, { endReason: 'final', observe: async () => ({ state: 'unknown' }) })).rejects.toBeInstanceOf(HoldError)
     })
     it('force cuts it off on purpose', async () => {
       const reg = createSessionRegistry(file)
@@ -82,7 +82,7 @@ describe('createSessionRegistry', () => {
       const reg = createSessionRegistry(file)
       await reg.add({ ...session('both'), conversationId: 'conv-1' } as never)
       let asked: { id: string; conversationId?: string } | undefined
-      await killAndRetireSession('both', async () => true, reg, { observe: async r => { asked = r; return { state: 'none' } } })
+      await killAndRetireSession('both', async () => true, reg, { endReason: 'final', scheduleCleanup: () => {}, observe: async r => { asked = r; return { state: 'none' } } })
       expect(asked).toMatchObject({ id: 'both', conversationId: 'conv-1' })
     })
   })

@@ -27,7 +27,7 @@ import { alertQuarantined, durableWrite, emptiesExistingLedger, readLastGood, re
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
-import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
+import { CONVERSATION_LINK_REASONS as LINK_REASONS, KILL_END_REASONS, type ConversationLinkReason, type KillEndReason } from '@agentistics/core'
 import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 import { RefusalLog } from './refusal-log'
@@ -142,6 +142,8 @@ export interface SessionPatch {
   parentSessionId?: string | null
   parentConversationId?: string | null
   endedAt?: string | null
+  /** See `ManagedSession.endReason`. `null` clears it. */
+  endReason?: KillEndReason | null
   conversationId?: string
   /** See `ManagedSession.conversationLink`. Written beside `conversationId`, never on its own. */
   conversationLink?: 'assigned' | 'observed'
@@ -251,6 +253,7 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...(typeof s.parentConversationId === 'string' ? { parentConversationId: s.parentConversationId } : {}),
     ...(typeof s.attemptId === 'string' ? { attemptId: s.attemptId } : {}),
     ...(typeof s.endedAt === 'string' ? { endedAt: s.endedAt } : {}),
+    ...(KILL_END_REASONS.includes(s.endReason as KillEndReason) ? { endReason: s.endReason as KillEndReason } : {}),
     // Written by `resumeSession` and `openTask` and, until this line existed, dropped on the way back
     // in — so the exact conversation a reopened session drives was recorded and then never read, and
     // the next reopen fell back to the harness+directory guess that cannot tell two sessions of one
@@ -696,15 +699,23 @@ export interface KillOptions {
   force?: boolean
   /** Where the hold is read from (tests); default `observeHoldNow`. */
   observe?: (row: { id: string; conversationId?: string }) => Promise<HoldObservation>
+  /**
+   * WHY the session is ended, said by every caller, never inferred (see `KillEndReason`). Only `final`
+   * may clean its worktree. Recorded on the row.
+   */
+  endReason: KillEndReason
+  /** The cleanup a final end asks for (tests); default: the server's, on the real registry only. */
+  scheduleCleanup?: (session: { id: string; cwd: string; taskId?: string }) => void
 }
 
 /** Record the decision BEFORE removing the pane; undo it if the backend refuses the kill. Throws `HoldError` on a held session. */
 export async function killAndRetireSession(
   id: string,
   kill: () => Promise<boolean>,
-  registry: SessionRegistry = defaultRegistry,
-  opts: KillOptions = {},
+  registry: SessionRegistry | undefined,
+  opts: KillOptions,
 ): Promise<boolean> {
+  registry ??= defaultRegistry
   const row = (await registry.read()).find(m => m.id === id)
   // THE ONE HOLD GUARD: asked here, as late as it can be, so every door — CLI, web/cockpit, account switch,
   // mode migration, retire — is covered and a hold that starts during a caller's own awaits is still seen. `force` cuts it off.
@@ -716,18 +727,28 @@ export async function killAndRetireSession(
   // the registry — fechar-entregue, a leader's retire and `session kill` all pass here. Bounded and best effort: never blocks the kill.
   if (row?.subtaskId && !row.endedAt && registry === defaultRegistry) await import('../delivery/host').then(m => m.stampProvenanceOfSession(id)).catch(() => undefined)
   const previous = row?.endedAt
-  await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
+  const previousReason = row?.endReason
+  const restore = { endedAt: previous ?? null, endReason: previousReason ?? null }
+  await registry.patch(id, { endedAt: previous ?? new Date().toISOString(), endReason: opts.endReason })
   try {
     if (await kill()) {
       // A worker stopped on purpose frees a slot: the delivery queue looks at its next piece now (server process only).
       void import('./shared-snapshot').then(async s => { if (s.isServerProcess()) (await import('../delivery/queue-kick')).kickQueueNext('sessão encerrada') }).catch(() => undefined)
+      // DISCO.WORKTREES: a handed-back worker's merged, clean worktree goes with its FINAL end (server only, real registry only).
+      if (opts.endReason === 'final' && row?.cwd) {
+        const target = { id: row.id, cwd: row.cwd, ...(row.taskId ? { taskId: row.taskId } : {}) }
+        if (opts.scheduleCleanup) opts.scheduleCleanup(target)
+        else if (registry === defaultRegistry) {
+          void import('./shared-snapshot').then(async s => { if (s.isServerProcess()) (await import('../clean/clean-io')).scheduleHandoffCleanup(target) }).catch(() => undefined)
+        }
+      }
       return true
     }
   } catch (e) {
-    await registry.patch(id, { endedAt: previous ?? null })
+    await registry.patch(id, restore)
     throw e
   }
-  await registry.patch(id, { endedAt: previous ?? null })
+  await registry.patch(id, restore)
   return false
 }
 

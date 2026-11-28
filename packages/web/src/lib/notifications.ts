@@ -243,7 +243,15 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Há espaço para liberar', message: '{count} item(ns) concluído(s) ou parado(s) podem ser removido(s). Veja o que dá para limpar.' },
     en: { title: 'You can free some space', message: '{count} completed or idle item(s) can be removed. See what can be cleaned.' },
   },
-  'clean.started': { pt: { title: 'Limpeza em andamento', message: 'Verificando novamente antes de remover. Nada em andamento será tocado.' }, en: { title: 'Cleanup started', message: 'Checking again before removal. Nothing in progress will be touched.' } },
+  'clean.disk-low': {
+    pt: { title: 'Pouco espaço em disco', message: '{free} livres (limite {floor}). A limpeza segura pode liberar {freed} ({count} item(ns)). Veja a lista e confirme o que deseja limpar.' },
+    en: { title: 'Disk space is low', message: '{free} free (floor {floor}). A safe cleanup can free {freed} ({count} item(s)). See the list and confirm what to clean.' },
+  },
+  'clean.disk-low-wsl': {
+    pt: { title: 'Pouco espaço em disco', message: '{free} livres (limite {floor}). A limpeza segura pode liberar {freed} ({count} item(ns)). No WSL, o espaço só volta para o Windows com o VHD esparso ligado ou depois de compactar o disco virtual.' },
+    en: { title: 'Disk space is low', message: '{free} free (floor {floor}). A safe cleanup can free {freed} ({count} item(s)). On WSL the space returns to Windows only with sparse VHD on, or after compacting the virtual disk.' },
+  },
+  'clean.started':{ pt: { title: 'Limpeza em andamento', message: 'Verificando novamente antes de remover. Nada em andamento será tocado.' }, en: { title: 'Cleanup started', message: 'Checking again before removal. Nothing in progress will be touched.' } },
   'clean.failed': { pt: { title: 'Não foi possível iniciar a limpeza', message: 'Tente novamente.' }, en: { title: 'Cleanup could not start', message: 'Try again.' } },
   'clean.done': { pt: { title: 'Limpeza concluída', message: '{freed} liberados. {worktrees} worktree(s) e {nodeModules} pasta(s) de dependências removidos.' }, en: { title: 'Cleanup complete', message: '{freed} freed. Removed {worktrees} worktree(s) and {nodeModules} dependency folder(s).' } },
   'clean.partial': { pt: { title: 'Limpeza concluída com itens mantidos', message: '{freed} liberados. {skipped} item(ns) foram mantidos por segurança; {errors} erro(s).' }, en: { title: 'Cleanup finished with items kept', message: '{freed} freed. {skipped} item(s) were kept for safety; {errors} error(s).' } },

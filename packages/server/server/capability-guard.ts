@@ -51,6 +51,7 @@ const EXACT: ReadonlyMap<string, keyof Capabilities> = new Map<string, keyof Cap
   ['/api/clean/plan', 'localShell'],
   ['/api/clean/apply', 'localShell'],
   ['/api/clean/job', 'localShell'],
+  ['/api/clean/disk', 'localShell'],
   // One level of DIRECTORY names under the home or an enabled disk, for New session's folder
   // browser. It reads the host's file system, so it rides the fleet's capability.
   ['/api/fs/folders', 'localShell'],

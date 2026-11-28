@@ -74,6 +74,7 @@ There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). B
 | **Metrics** — 6 | `agentistics_summary`, `agentistics_harnesses`, `agentistics_projects`, `agentistics_sessions`, `agentistics_costs`, `agentistics_repos` |
 | **Custom layouts** — 8 | `agentistics_component_catalog`, `agentistics_get_layouts`, `agentistics_build_layout`, `agentistics_add_component`, `agentistics_remove_component`, `agentistics_create_layout`, `agentistics_set_active_layout`, `agentistics_delete_layout` |
 | **PDF export** — 1 | `agentistics_export_pdf` |
+| **Disk cleanup** — 2 | `agentistics_clean` (read-only: free space against its floor, what a safe cleanup would free), `agentistics_clean_apply` (destructive: removes the listed items, each re-checked; only with the person's agreement) |
 | **Tags** — 2, read-only | `agentistics_tags`, `agentistics_tag_detail` |
 | **Vault** — 1, read-only | `agentistics_vault_status` — how the vault is protected (state, ways to confirm in use and offered, legacy app-code flag, recovery key present, password rules); never an item or a secret. Setting up, unlocking and the vault password stay with the person (the /vault page or `agentop vault`) |
 | **Team** — 2, read-only | `agentistics_team_status`, `agentistics_team_members` |

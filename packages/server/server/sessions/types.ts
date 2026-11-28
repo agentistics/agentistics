@@ -6,7 +6,7 @@
  * planner emits an argv, the backend hosts an argv, and that is the only thing they share.
  */
 
-import type { CanonicalMode, ConversationLinkReason, HarnessId, SendNowOutcome, SessionMode } from '@agentistics/core'
+import type { CanonicalMode, ConversationLinkReason, HarnessId, KillEndReason, SendNowOutcome, SessionMode } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
 import type { HarnessChat, StructuredAmendResult, StructuredAnswer, StructuredAttention, StructuredCancelReceipt, StructuredLimits, StructuredMcpServer, StructuredRequestState, StructuredSetModel, StructuredSubmit, StructuredSubmitReceipt } from '@agentistics/engine-api'
 
@@ -498,6 +498,8 @@ export interface ManagedSession {
    * thing that happened, and reopening it is the ordinary next thing to want.
    */
   endedAt?: string
+  /** WHY a kill ended it, said by the caller. Only `final` lets cleanup treat its worktree as abandoned. */
+  endReason?: KillEndReason
   /**
    * The harness's own conversation id this session drives, when it is known exactly.
    *

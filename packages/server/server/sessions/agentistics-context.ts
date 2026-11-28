@@ -110,6 +110,9 @@ const TOOL_GROUPS = {
     'agentistics_browser_tab_select', 'agentistics_browser_tab_close', 'agentistics_browser_close',
     'agentistics_browser_wait_unlock', 'agentistics_browser_lock',
   ],
+  // DISCO.WORKTREES: the disk floor + safe cleanup plan (read) and its apply (only after the person agreed) —
+  // not listed in the briefing; the disk-floor notice to leaders names them when it fires.
+  Clean: ['agentistics_clean', 'agentistics_clean_apply'],
   // LIVRO.SEAMS: a hand-off successor's confirmation — not listed in the briefing; the successor's own spawn prompt names it.
   Handoff: ['agentistics_book_takeover'],
   Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_get_preferences', 'agentistics_set_preferences', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],

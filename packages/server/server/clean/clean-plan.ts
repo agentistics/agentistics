@@ -2,7 +2,10 @@
  * clean-plan.ts — what `agentop clean` would free, decided from facts only (PERF.1 step 5). Pure.
  *
  * A worktree is REMOVED only when everything says it is done: not the repository's main checkout,
- * its HEAD contained in origin/<branch> (pushed), no uncommitted change, not locked.
+ * no uncommitted change, not locked, its commits published (HEAD contained in origin/<branch>, or in
+ * the head of a merged pull request) and either MERGED, or idle for `staleDays` — in that last case
+ * the commits are saved as patches first. A merged one younger than `YOUNG_DAYS` stays unless its
+ * owning session ended for good.
  * A worktree whose directory is gone is PRUNED (git's own bookkeeping). A worktree that is not merged
  * but has had no commit for `staleDays` keeps its work and loses only its `node_modules`, which an
  * install regenerates. Everything else is KEPT, with the reason said. Branches are never deleted.
@@ -26,10 +29,16 @@ export interface WorktreeFacts {
    * a rebase merge or a cherry-pick). A squash of SEVERAL commits into one is NOT detected; it reads unmerged.
    */
   squashed?: boolean
+  /** HEAD is contained in the head commit of a MERGED pull request of this branch (see merged-prs.ts). */
+  prMerged?: boolean
+  /** That pull request's head commit; the apply path re-checks containment against it. */
+  prHead?: string
   /** A live process, or a not-ended managed session, has its cwd inside this worktree. */
   inUse?: boolean
   /** Whether it is in use could not be established (process list or session registry unreadable). Never removed. */
   useUnknown?: boolean
+  /** A managed session STARTED in this worktree ended for good (`endReason: 'final'`): the age floor no longer applies. */
+  ownerEnded?: boolean
   /** Ignored files that an install/build does not regenerate (`.env.local`, secrets…) live in the tree. */
   keepsIgnored?: boolean
   dirty: boolean
@@ -44,14 +53,16 @@ export interface WorktreeFacts {
 }
 
 export type CleanAction =
-  | { kind: 'remove'; frees: number }
+  | { kind: 'remove'; frees: number; savePatch?: boolean }
   | { kind: 'prune'; frees: 0 }
   | { kind: 'node-modules'; frees: number }
-  | { kind: 'keep'; reason: 'main' | 'locked' | 'dirty' | 'active' | 'unknown-use' | 'ignored' | 'unmerged' }
+  | { kind: 'keep'; reason: 'main' | 'locked' | 'dirty' | 'active' | 'unknown-use' | 'ignored' | 'young' | 'unmerged' }
 
 export interface CleanItem { facts: WorktreeFacts; action: CleanAction }
 
 export const STALE_DAYS = 30
+/** A merged worktree younger than this stays, unless the session that owned it ended for good. */
+export const YOUNG_DAYS = 3
 const DAY = 86_400_000
 
 export function planClean(all: readonly WorktreeFacts[], nowMs: number, staleDays = STALE_DAYS): CleanItem[] {
@@ -67,11 +78,19 @@ function decide(f: WorktreeFacts, now: number, staleDays: number): CleanAction {
   // Fail closed: when "in use" could not be established nothing that depends on it is decided.
   if (f.useUnknown) return { kind: 'keep', reason: 'unknown-use' }
   // Ignored files are invisible to `git worktree remove`; unlike node_modules they cannot be regenerated.
-  if (f.keepsIgnored && (f.merged || f.pushed || f.squashed) && !f.dirty) return { kind: 'keep', reason: 'ignored' }
-  // A local merge is not an off-machine copy. Detached HEAD never proves a pushed branch.
-  if (f.branch && f.pushed && !f.dirty) return { kind: 'remove', frees: f.sizeBytes }
-  if ((f.merged || f.squashed) && !f.pushed && !f.dirty) return { kind: 'keep', reason: 'unmerged' }
+  const merged = !!(f.merged || f.squashed || f.prMerged)
+  if (f.keepsIgnored && (merged || f.pushed) && !f.dirty) return { kind: 'keep', reason: 'ignored' }
   const stale = f.lastCommitMs !== null && now - f.lastCommitMs >= staleDays * DAY
+  // A local merge is not an off-machine copy; detached HEAD never proves a published branch. Published AND
+  // merged goes; published but unmerged ("pushed" alone is not done) goes only once idle, patches first.
+  if (f.branch && (f.pushed || f.prMerged) && !f.dirty) {
+    // An unknown age reads as young: fail closed.
+    const young = f.lastCommitMs === null || now - f.lastCommitMs < YOUNG_DAYS * DAY
+    if (merged && young && !f.ownerEnded) return { kind: 'keep', reason: 'young' }
+    if (merged) return { kind: 'remove', frees: f.sizeBytes }
+    if (stale) return { kind: 'remove', frees: f.sizeBytes, savePatch: true }
+  }
+  if (merged && !f.pushed && !f.dirty) return { kind: 'keep', reason: 'unmerged' }
   if (stale && f.nodeModulesBytes > 0) return { kind: 'node-modules', frees: f.nodeModulesBytes }
   if (f.dirty) return { kind: 'keep', reason: 'dirty' }
   return { kind: 'keep', reason: 'unmerged' }
@@ -91,14 +110,14 @@ export function fmtBytes(n: number): string {
 
 const WORDS = {
   en: {
-    remove: 'remove (committed and pushed, clean)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
-    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: live process inside', 'unknown-use': 'keep: cannot tell whether it is in use (process list or session registry unreadable)', ignored: 'keep: ignored files that cannot be regenerated', unmerged: 'keep: HEAD is not on a pushed branch (a local merge is not a remote copy)',
+    remove: 'remove (merged and clean)', 'remove-patch': 'remove (not merged, idle; commits saved as patches first)', prune: 'prune (directory is gone)', 'node-modules': 'remove node_modules only (no commit in 30+ days, not merged)',
+    main: 'keep: main checkout', locked: 'keep: locked', dirty: 'keep: uncommitted changes', active: 'keep: live process inside', 'unknown-use': 'keep: cannot tell whether it is in use (process list or session registry unreadable)', ignored: 'keep: ignored files that cannot be regenerated', young: 'keep: last commit less than 3 days ago', unmerged: 'keep: HEAD is not on a pushed branch (a local merge is not a remote copy)',
     total: (b: string, n: number) => `${n} item${n === 1 ? '' : 's'} would free ${b}.`,
     nothing: 'Nothing to clean: every worktree is in use or holds unmerged or uncommitted work.',
   },
   pt: {
-    remove: 'remover (commitado e enviado, limpo)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
-    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: processo vivo dentro', 'unknown-use': 'manter: não dá para saber se está em uso (lista de processos ou registro de sessões ilegível)', ignored: 'manter: arquivos ignorados não regeneráveis', unmerged: 'manter: HEAD não está em branch enviada (merge local não é cópia remota)',
+    remove: 'remover (merged e limpo)', 'remove-patch': 'remover (não merged, parado; commits salvos como patch antes)', prune: 'podar (a pasta não existe mais)', 'node-modules': 'remover só node_modules (sem commit há 30+ dias, não merged)',
+    main: 'manter: checkout principal', locked: 'manter: travado', dirty: 'manter: mudanças não commitadas', active: 'manter: processo vivo dentro', 'unknown-use': 'manter: não dá para saber se está em uso (lista de processos ou registro de sessões ilegível)', ignored: 'manter: arquivos ignorados não regeneráveis', young: 'manter: último commit há menos de 3 dias', unmerged: 'manter: HEAD não está em branch enviada (merge local não é cópia remota)',
     total: (b: string, n: number) => `${n} ${n === 1 ? 'item liberaria' : 'itens liberariam'} ${b}.`,
     nothing: 'Nada a limpar: todo worktree está em uso ou guarda trabalho não merged ou não commitado.',
   },
@@ -113,7 +132,7 @@ export function formatPlan(items: readonly CleanItem[], lang: 'en' | 'pt' = 'en'
   for (const i of items) {
     if (i.facts.repo !== repo) { repo = i.facts.repo; out.push(short(repo)) }
     const a = i.action
-    const label = a.kind === 'keep' ? w[a.reason] : w[a.kind]
+    const label = a.kind === 'keep' ? w[a.reason] : a.kind === 'remove' && a.savePatch ? w['remove-patch'] : w[a.kind]
     const size = i.facts.sizeUnknown ? '?' : a.kind === 'keep' ? fmtBytes(i.facts.sizeBytes) : fmtBytes(a.frees)
     out.push(`  ${a.kind === 'keep' ? ' ' : '•'} ${short(i.facts.path)}${i.facts.branch ? ` [${i.facts.branch}]` : ''}  ${size}  ${label}`)
   }

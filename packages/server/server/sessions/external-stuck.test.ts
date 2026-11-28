@@ -39,7 +39,7 @@ test('server ends the external process tree without looking up cwd or conversati
   const own = await collectOwnPids(child.pid)
   __setFleetHostForTest('en', { sessions: async () => ({ sessions: [{ ...row, pid: child.pid }] }) } as never)
   try {
-    expect((await runFleetAction('en', { id: row.id, action: 'kill' })).ok).toBe(true)
+    expect((await runFleetAction('en', { id: row.id, action: 'kill' }, 'final')).ok).toBe(true)
     await child.exited
     expect(own.every(ref => !procIO().alive(ref))).toBe(true)
   } finally { try { child.kill() } catch {} }
@@ -71,7 +71,7 @@ test('managed row end/remove accept a deleted cwd and absent conversation', asyn
   // The action reads its target off the observed fleet; ending itself uses the real host method.
   __setFleetHostForTest('en', { sessions: async () => ({ sessions: [{ ...row, id, state: 'lost' }] }), killSession: host.killSession } as never)
   try {
-    expect((await runFleetAction('en', { id, action: 'kill' })).ok).toBe(true)
+    expect((await runFleetAction('en', { id, action: 'kill' }, 'final')).ok).toBe(true)
     expect(killed).toEqual([id])
     expect((await readRegistry()).find(r => r.id === id)?.endedAt).toBeDefined()
     expect((await runFleetAction('en', { id, action: 'forget' })).ok).toBe(true)

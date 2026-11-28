@@ -407,7 +407,7 @@ export function defaultTriggerHostDeps(): TriggerHostDeps {
     },
     kill: async rowId => {
       const { runFleetAction } = await import('../sessions/fleet-web')
-      const out = await runFleetAction('en', { action: 'kill', id: rowId })
+      const out = await runFleetAction('en', { action: 'kill', id: rowId }, 'final')
       return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
     },
   }

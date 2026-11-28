@@ -3101,7 +3101,7 @@ function Question({
           if (!kill) return onClose()
           onRun(async () => {
             for (const sess of ask.sessions) {
-              await kill.call(host, sess.id)
+              await kill.call(host, sess.id, false, 'final')
             }
             return { ok: true, message: '' }
           }, s.actSessions.kill)
@@ -3299,7 +3299,7 @@ function Question({
           if (!yes) return onClose()
           const kill = host.killSession
           if (!kill) return onClose()
-          onRun(() => kill.call(host, session.id, true), s.actSessions.kill)
+          onRun(() => kill.call(host, session.id, true, 'final'), s.actSessions.kill)
         }}
       />
     )
@@ -3332,7 +3332,7 @@ function Question({
           // working on it, "is the task done?" has an obvious answer and asking it is noise.
           // A stop refused because the session is in use asks once more (below) — and not about the task.
           let held: string | undefined
-          const stop = async () => { const r = await kill.call(host, session.id); if (r.held) held = r.message; return r }
+          const stop = async () => { const r = await kill.call(host, session.id, false, 'final'); if (r.held) held = r.message; return r }
           const afterStop = (): void => {
             if (held !== undefined) onAskKillHeld(session, held)
             else if (task && !(fleet?.finishedTasks ?? []).includes(task) && lastLiveOfTask(fleet?.sessions ?? [], session)) onAskFinish(task)

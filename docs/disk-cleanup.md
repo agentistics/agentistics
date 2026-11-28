@@ -7,10 +7,58 @@ the existing live-session/server/process protections and git's refusal to remove
 Branches remain intact. Dependencies are initially unchecked; missing-folder records can be
 selected even though they free zero bytes. Protected items remain visible with their reason.
 
-Worktree removal requires a named branch whose HEAD is contained in `origin/<branch>`, plus a
-clean working tree. A merge into a local default branch, or matching patches there, does not
-prove the work was pushed. Detached HEADs are kept. Apply checks these conditions and live use
-again after waiting and immediately before git removes the worktree, without `--force`.
+Worktree removal requires a clean working tree and a named branch whose commits are published:
+HEAD is contained in `origin/<branch>`, or in the head of a **merged pull request** of that branch.
+A merge into a local default branch, or matching patches there, does not prove the work was pushed.
+Detached HEADs are kept. Apply checks these conditions and live use again after waiting and
+immediately before git removes the worktree, without `--force`.
+
+Published is not enough on its own. A **merged** worktree (ancestor of the default branch, rebased
+or cherry-picked onto it, or merged by pull request) is removable. A published but **unmerged** one is
+removable only after 30 days without a commit, and its commits are first saved with `git format-patch`
+under `~/.agentistics/archive/worktree-patches/<repo>/<name>-<date>/`; if the patches cannot be
+written, the worktree stays. Branches are never deleted.
+
+A merged worktree whose last commit is **less than 3 days** old is kept (`young`), unless a managed
+session started in it was ended for good (`endReason: 'final'`). An unknown commit date counts as
+young. Removing is ordered so that every check runs before anything is deleted: a refusal leaves
+`node_modules` in place too; the tree is then checked once more before git removes it.
+
+Merged pull requests come from `gh` when it is installed, signed in and the repository's `origin` is on
+GitHub: one `gh pr list --state merged` per repository, cached for a day in `clean-merged-prs.json`.
+This is what recognises a squash merge of several commits. Without `gh` the git-only answer applies.
+
+## Cleanup when a worker is closed
+
+When a managed session that left a hand-back is closed, and the directory it was started in is the
+root of a linked worktree that is merged and clean (no uncommitted change, no ignored file that cannot
+be regenerated, nobody else inside), the server removes that worktree through the same paced, locked
+path, 20 seconds later, and notes it on the session's task. Anything in doubt is kept. Sessions that
+end on their own are not covered; their worktrees show up in the normal plan.
+
+Only a **final** end does this: a person's or a leader's kill or retire, or the engine's
+`fechar-entregue`. An account switch, a mode migration and a hand-off recreate the session in the same
+directory and never clean it, and neither does the engine ending a delegated session (`delegation`).
+Every kill states its reason (`endReason`, required by type) and the row records it. The cockpit's
+kill is `final`, but the immediate removal runs only in the server process; for a cockpit kill the
+worktree leaves with the next plan. Right before removing, the registry and the process list are read again: any session in
+that directory that is not ended (running, starting or stopped) keeps it.
+
+## Disk floor
+
+Every hour the server reads the free space of the filesystem holding the worktrees (the fullest one
+when projects live on several). The floor is the **larger** of 15 % and 30 GB; change it with
+`diskCeiling: { freePct, freeGB }` in the preferences. Under it, at most once a day, the person gets a
+notification that opens the cleanup dialog and each running **leader** session gets a message saying
+how much a safe cleanup would free. Nothing is removed without a confirmation. A recovery above the
+floor plus 10 % re-arms the notice.
+
+**WSL.** Freed space returns to Windows only with sparse VHD turned on (on Windows:
+`wsl --manage <distro> --set-sparse true`) or after compacting the virtual disk. It is said once per
+machine, in the notice or in the first `GET /api/clean/disk` that reads it, and remembered.
+
+`GET /api/clean/disk` returns the reading (`volume`, `floorBytes`, `low`, `wslNote`). The MCP tools
+`agentistics_clean` (read) and `agentistics_clean_apply` (action) mirror the REST pair.
 
 CLI and web cleanup hold `/tmp/agentistics-cleanup.lock` with kernel `flock`. Removals reserve
 their start in its adjacent `.starts` history: at least two minutes apart and at most six per

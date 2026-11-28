@@ -248,6 +248,8 @@ export interface Preferences {
    *    - 'full'        = mirror raw transcripts too (heavy, lets you re-read chats)
    *    - 'off'         = do nothing, use Claude's default folder */
   archiveMode?: 'off' | 'consolidate' | 'full'
+  /** Disk floor for the volume holding the worktrees: the LARGER of the two (default 15 % and 30 GB). */
+  diskCeiling?: { freePct?: number; freeGB?: number }
   /**
    * How often the cockpit refreshes the fleet list and the session detail pane, in milliseconds.
    *

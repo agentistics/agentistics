@@ -10,6 +10,8 @@ import { planClean } from './clean-plan'
 const dirs: string[] = []
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
 const env = gitTestEnv()
+/** The commits here are seconds old; plan as of past the 3-day age floor. */
+const later = () => Date.now() + 4 * 86_400_000
 const g = (cwd: string, ...a: string[]) => execFileSync('git', a, { cwd, env: gitTestEnv(), encoding: 'utf8' })
 const applyClean: typeof realApplyClean = (items, o = {}) => {
   let time = Date.now()
@@ -82,8 +84,9 @@ describe('clean io (real git)', () => {
     expect(by('squash')).toMatchObject({ merged: false, squashed: true })
     expect(by('pushed')).toMatchObject({ merged: false, pushed: true })
     expect(by('local')).toMatchObject({ pushed: false, squashed: false })
-    const kinds = Object.fromEntries(planClean(facts, Date.now()).map(i => [i.facts.path.split('/').pop(), i.action.kind]))
-    expect(kinds).toMatchObject({ squash: 'keep', pushed: 'remove', local: 'keep' })
+    const kinds = Object.fromEntries(planClean(facts, later()).map(i => [i.facts.path.split('/').pop(), i.action.kind]))
+    // Pushed but not merged is not "done": a recent one stays (it goes only after 30 days, patch first).
+    expect(kinds).toMatchObject({ squash: 'keep', pushed: 'keep', local: 'keep' })
     expect(cwdInside(join(root, 'x'), [join(root, 'x', 'sub')])).toBe(true)
     expect(cwdInside(join(root, 'x'), [join(root, 'xy')])).toBe(false)
   })
@@ -95,7 +98,7 @@ describe('clean io (real git)', () => {
     const by = (p: string) => facts.find(f => f.path === join(root, p))!
     expect(by('merged').inUse).toBe(true)
     expect(by('dirty').inUse).toBe(false)
-    expect(planClean(facts, Date.now()).find(i => i.facts.path === join(root, 'merged'))!.action).toEqual({ kind: 'keep', reason: 'active' })
+    expect(planClean(facts, later()).find(i => i.facts.path === join(root, 'merged'))!.action).toEqual({ kind: 'keep', reason: 'active' })
   })
 
   const seamEnv = { env, managedCwds: [] as string[], processCwds: () => ({ cwds: [] as string[], known: true }) }
@@ -104,19 +107,23 @@ describe('clean io (real git)', () => {
     const bare = join(root, 'bare.git'); g(root, 'init', '-q', '--bare', bare); g(r, 'remote', 'set-url', 'origin', bare)
     g(r, 'worktree', 'add', '-q', join(root, 'pw'), '-b', 'pw')
     const wt = join(root, 'pw'); writeFileSync(join(wt, 'c'), 'c'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'c'); g(wt, 'push', '-q', 'origin', 'pw')
+    mergeIn(r)
     return { root, r, wt }
   }
+  /** Merge pw into main and publish it, so the worktree counts as done. */
+  const mergeIn = (r: string) => { g(r, 'merge', '-q', '--no-edit', 'pw'); g(r, 'push', '-q', 'origin', 'main') }
 
   test('an ignored file that cannot be regenerated keeps a pushed worktree, in the plan and in the apply', async () => {
     const { r, wt } = pushedWorktree()
     writeFileSync(join(wt, '.gitignore'), '.env.local\n*.secret\ndist\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ign'); g(wt, 'push', '-q', 'origin', 'pw')
+    mergeIn(r)
     mkdirSync(join(wt, 'dist')); writeFileSync(join(wt, 'dist', 'x'), 'x')
     // only regenerable ignored output: removable
     let facts = await worktreeFacts(r, seamEnv)
     expect(facts.find(f => f.path === wt)).toMatchObject({ pushed: true, dirty: false })
     expect(facts.find(f => f.path === wt)!.keepsIgnored).toBeUndefined()
-    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action.kind).toBe('remove')
-    const staleRemovable = planClean(facts, Date.now())
+    expect(planClean(facts, later()).find(i => i.facts.path === wt)!.action.kind).toBe('remove')
+    const staleRemovable = planClean(facts, later())
     // a secret appears AFTER the plan: the apply must notice and refuse
     writeFileSync(join(wt, 'creds.secret'), 's')
     const problems = await applyClean(staleRemovable, seamEnv)
@@ -124,7 +131,7 @@ describe('clean io (real git)', () => {
     expect(existsSync(join(wt, 'creds.secret'))).toBe(true)
     // and a fresh plan keeps it with the stated reason
     facts = await worktreeFacts(r, seamEnv)
-    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'ignored' })
+    expect(planClean(facts, later()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'ignored' })
     writeFileSync(join(wt, '.env.local'), 'k')
     expect(existsSync(join(wt, '.env.local'))).toBe(true)
   })
@@ -159,7 +166,7 @@ describe('clean io (real git)', () => {
       if (text !== null) writeFileSync(reg, text)
       const warnings: string[] = []
       const facts = await worktreeFacts(r, { env, registryFile: reg, processCwds: () => ({ cwds: [], known: true }), onWarning: m => warnings.push(m) })
-      return { f: facts.find(x => x.path === wt)!, warnings, plan: planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action }
+      return { f: facts.find(x => x.path === wt)!, warnings, plan: planClean(facts, later()).find(i => i.facts.path === wt)!.action }
     }
     const corrupt = await run('{not json')
     expect(corrupt.f.useUnknown).toBe(true)
@@ -176,12 +183,12 @@ describe('clean io (real git)', () => {
   test('a process reader that cannot answer is unknown, not "not in use"', async () => {
     const { r, wt } = pushedWorktree()
     const facts = await worktreeFacts(r, { env, managedCwds: [], processCwds: () => ({ cwds: [], known: false }) })
-    expect(planClean(facts, Date.now()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'unknown-use' })
+    expect(planClean(facts, later()).find(i => i.facts.path === wt)!.action).toEqual({ kind: 'keep', reason: 'unknown-use' })
   })
 
   test('the apply re-checks use and dirtiness right before each removal', async () => {
     const { r, wt } = pushedWorktree()
-    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    const plan = planClean(await worktreeFacts(r, seamEnv), later()).filter(i => i.facts.path === wt)
     expect(plan[0]!.action.kind).toBe('remove')
     // a process moves in after the plan
     let problems = await applyClean(plan, { ...seamEnv, processCwds: () => ({ cwds: [join(wt, 'sub')], known: true }) })
@@ -200,7 +207,7 @@ describe('clean io (real git)', () => {
 
   test('applyClean uses throttledRemove batches and refuses dirty, unpushed and detached HEAD at apply time', async () => {
     const { r, wt } = pushedWorktree()
-    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    const plan = planClean(await worktreeFacts(r, seamEnv), later()).filter(i => i.facts.path === wt)
     writeFileSync(join(wt, 'late'), 'not saved')
     expect((await applyClean(plan, seamEnv)).join()).toContain('uncommitted changes')
     g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'local only')
@@ -269,8 +276,9 @@ describe('clean io (real git)', () => {
   test('a new unpushed commit during dependency removal prevents the final worktree removal', async () => {
     const { r, wt } = pushedWorktree()
     writeFileSync(join(wt, '.gitignore'), 'node_modules\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ignore'); g(wt, 'push', '-q', 'origin', 'pw')
+    mergeIn(r)
     mkdirSync(join(wt, 'node_modules')); writeFileSync(join(wt, 'node_modules', 'dep'), 'x')
-    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    const plan = planClean(await worktreeFacts(r, seamEnv), later()).filter(i => i.facts.path === wt)
     let committed = false
     const problems = await applyClean(plan, { ...seamEnv, cleanup: { onBatch: () => {
       expect(existsSync(join(wt, 'node_modules'))).toBe(false)
@@ -286,11 +294,12 @@ describe('clean io (real git)', () => {
   test('tight mid-tree leaves sources and remaining dependencies intact; symlinks never traverse outside', async () => {
     const { root, r, wt } = pushedWorktree()
     writeFileSync(join(wt, '.gitignore'), 'node_modules\n'); g(wt, 'add', '.'); g(wt, 'commit', '-qm', 'ignore'); g(wt, 'push', '-q', 'origin', 'pw')
+    mergeIn(r)
     mkdirSync(join(wt, 'node_modules'))
     for (let i = 0; i < 2100; i++) writeFileSync(join(wt, 'node_modules', `f${i}`), 'x')
     const outside = join(root, 'outside'); mkdirSync(outside); writeFileSync(join(outside, 'saved'), 'keep')
     symlinkSync(outside, join(wt, 'node_modules', 'outside'))
-    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => i.facts.path === wt)
+    const plan = planClean(await worktreeFacts(r, seamEnv), later()).filter(i => i.facts.path === wt)
     const controller = new AbortController()
     let tight = false
     await expect(applyClean(plan, { ...seamEnv, signal: controller.signal, cleanup: {
@@ -311,7 +320,7 @@ describe('clean io (real git)', () => {
       const branch = path.split('/').at(-1)!
       g(r, 'worktree', 'add', '-q', path, '-b', branch); g(r, 'push', '-q', 'origin', branch)
     }
-    const plan = planClean(await worktreeFacts(r, seamEnv), Date.now()).filter(i => paths.includes(i.facts.path))
+    const plan = planClean(await worktreeFacts(r, seamEnv), later()).filter(i => paths.includes(i.facts.path))
     let now = 0, busy = true
     const starts: number[] = [], reasons: string[] = []
     const cleanup = {

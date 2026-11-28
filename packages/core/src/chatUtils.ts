@@ -4,6 +4,8 @@ export const TOOL_LABELS: Record<string, string> = {
   agentistics_sessions:          'Loading sessions',
   agentistics_costs:             'Analyzing costs',
   agentistics_benchmark_observed: 'Reading the Benchmark',
+  agentistics_clean: 'Reading the disk cleanup plan',
+  agentistics_clean_apply: 'Cleaning up disk space',
   agentistics_get_layouts:       'Reading layouts',
   agentistics_create_layout:     'Creating layout',
   agentistics_add_component:     'Adding component',

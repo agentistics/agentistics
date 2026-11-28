@@ -131,7 +131,7 @@ export function hostBookPort(lang: () => 'en' | 'pt'): EngineBookHost {
   return createBookHost({
     registry: async () => (await import('../sessions/registry')).readRegistry(),
     spawn: async body => (await import('../sessions/fleet-web')).runFleetSpawn(lang(), body),
-    kill: async id => (await import('../sessions/fleet-web')).runFleetAction(lang(), { id, action: 'kill' }),
+    kill: async id => (await import('../sessions/fleet-web')).runFleetAction(lang(), { id, action: 'kill' }, 'handoff'),
     requestRetire: async (predecessorId, successorId) => (await import('../sessions/team-links-io')).requestRetire(predecessorId, successorId),
     clearRole: clearSessionRole,
     verify: async (id, token) => (await import('../sessions/session-identity')).verifySessionIdentity(id, token),

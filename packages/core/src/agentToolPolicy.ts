@@ -128,6 +128,9 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_flow_status',
   // Hand-off book (1)
   'agentistics_book_takeover',
+  // Disk cleanup (2) — DISCO.WORKTREES
+  'agentistics_clean',
+  'agentistics_clean_apply',
   // Vault (1) — COFRE.DESBLOQUEIO
   'agentistics_vault_status',
   // Browser — NAVEGADOR S1 (status) + S2 (the session's own browser; the lock is S3)
@@ -197,6 +200,15 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_delete: {
     ...TASKS, risk: 'D', routes: ['DELETE /api/tasks/:ref'],
     reason: 'destroys a task with its history; re-classed D by the spec (§3.5), moves behind an intent in P2.6',
+  },
+  // ------------------------------------------------------------------ Disk cleanup (DISCO.WORKTREES)
+  agentistics_clean: {
+    ...TASKS, risk: 'R', routes: ['GET /api/clean/plan', 'GET /api/clean/disk', 'GET /api/clean/job'],
+    reason: 'reads what the safe cleanup would free, the free disk space against its floor, and a running cleanup; removes nothing',
+  },
+  agentistics_clean_apply: {
+    ...TASKS, risk: 'W', routes: ['POST /api/clean/apply'],
+    reason: 'removes only what no work depends on, each re-checked first: merged or published-and-patched worktrees (branches stay), reinstallable node_modules, records of missing folders; dirty or in-use trees are refused, and the plan it takes ids from is the same one the person confirms in the dialog',
   },
   agentistics_book_takeover: {
     ...TASKS, risk: 'W', routes: ['POST /api/book/takeover'],

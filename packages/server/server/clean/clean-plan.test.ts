@@ -5,7 +5,7 @@ const DAY = 86_400_000
 const NOW = 100 * DAY
 const wt = (o: Partial<WorktreeFacts>): WorktreeFacts => ({
   repo: '/r', path: '/r/.wt/x', branch: 'feat/x', isMain: false, missing: false, locked: false, merged: false, dirty: false,
-  lastCommitMs: NOW - DAY, sizeBytes: 500 * 1024 ** 2, nodeModulesBytes: 400 * 1024 ** 2, ...o,
+  lastCommitMs: NOW - 4 * DAY, sizeBytes: 500 * 1024 ** 2, nodeModulesBytes: 400 * 1024 ** 2, ...o,
 })
 
 describe('planClean', () => {
@@ -24,9 +24,36 @@ describe('planClean', () => {
     expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['node-modules', 'node-modules', 'unmerged', 'unmerged'])
   })
 
-  test('requires a clean pushed branch; local merges, squash-merges and detached HEAD are kept', () => {
-    const p = planClean([wt({ pushed: true }), wt({ squashed: true }), wt({ pushed: true, dirty: true }), wt({ pushed: false, squashed: false }), wt({ merged: true }), wt({ branch: null, pushed: true })], NOW)
+  test('requires a clean published branch; local merges, squash-merges and detached HEAD are kept', () => {
+    const p = planClean([wt({ merged: true, pushed: true }), wt({ squashed: true }), wt({ pushed: true, dirty: true }), wt({ pushed: false, squashed: false }), wt({ merged: true }), wt({ branch: null, pushed: true })], NOW)
     expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['remove', 'unmerged', 'dirty', 'unmerged', 'unmerged', 'unmerged'])
+  })
+
+  test('a merged pull request counts as merged and published, even with the branch gone from origin', () => {
+    const p = planClean([wt({ prMerged: true }), wt({ prMerged: true, dirty: true }), wt({ prMerged: true, keepsIgnored: true })], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['remove', 'dirty', 'ignored'])
+    expect(p[0]!.action).not.toHaveProperty('savePatch')
+  })
+
+  test('pushed but not merged is not "done": kept until idle 30 days, then removed with a patch saved first', () => {
+    const p = planClean([wt({ pushed: true }), wt({ pushed: true, lastCommitMs: NOW - 2 * DAY }), wt({ pushed: true, lastCommitMs: NOW - 31 * DAY }), wt({ pushed: true, lastCommitMs: null })], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['unmerged', 'unmerged', 'remove', 'unmerged'])
+    expect(p[2]!.action).toMatchObject({ savePatch: true })
+  })
+
+  test('a merged worktree with a commit under 3 days old stays, unless its owner session ended for good', () => {
+    const HOUR = 3_600_000
+    const p = planClean([
+      wt({ merged: true, pushed: true, lastCommitMs: NOW - HOUR }),
+      wt({ merged: true, pushed: true, lastCommitMs: NOW - HOUR, ownerEnded: true }),
+      wt({ merged: true, pushed: true, lastCommitMs: NOW - 4 * DAY }),
+      wt({ prMerged: true, lastCommitMs: NOW - HOUR }),
+      wt({ merged: true, pushed: true, lastCommitMs: null }),
+      wt({ merged: true, pushed: true, lastCommitMs: NOW - 3 * DAY }),
+    ], NOW)
+    expect(p.map(i => i.action.kind === 'keep' ? i.action.reason : i.action.kind)).toEqual(['young', 'remove', 'remove', 'young', 'young', 'remove'])
+    expect(formatPlan([p[0]!], 'pt').join('\n')).toContain('menos de 3 dias')
+    expect(formatPlan([p[0]!], 'en').join('\n')).toContain('less than 3 days')
   })
 
   test('"in use" means a live process inside it, and it protects even a merged worktree', () => {

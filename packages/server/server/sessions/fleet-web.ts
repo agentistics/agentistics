@@ -21,7 +21,7 @@ import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
 import { bounded } from './bounded'
 import { sessionActionError } from './action-error'
 import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
-import type { CanonicalMode, HarnessId, ProjectKind } from '@agentistics/core'
+import type { CanonicalMode, HarnessId, KillEndReason, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { recordPrompt } from './pending-prompts'
@@ -728,12 +728,16 @@ export async function readClosedFleet(lang: CliLang, offset: number, limit: numb
  * page was shown. A row whose reopen target cannot be resolved is refused by name rather than
  * spawning a session against a guess.
  */
+export function runFleetAction(lang: CliLang, req: FleetActionRequest & { action: Exclude<FleetActionRequest['action'], 'kill'> }): Promise<FleetActionResponse>
+/** Anything that may be a `kill` states WHY the session ends — said by the SERVER's caller, never read from the request body. */
+export function runFleetAction(lang: CliLang, req: FleetActionRequest, endReason: KillEndReason): Promise<FleetActionResponse>
 export async function runFleetAction(
   lang: CliLang,
   req: FleetActionRequest,
+  endReason?: KillEndReason,
 ): Promise<FleetActionResponse> {
   try {
-    const out = await runFleetActionOnce(lang, req)
+    const out = await runFleetActionOnce(lang, req, endReason)
     if (!out || typeof out.ok !== 'boolean') throw new Error('Session action returned no result')
     // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
     if (out.ok) kickFleet(req.id)
@@ -746,6 +750,7 @@ export async function runFleetAction(
 async function runFleetActionOnce(
   lang: CliLang,
   req: FleetActionRequest,
+  endReason?: KillEndReason,
 ): Promise<FleetActionResponse> {
   const s = controlStrings(lang)
   const host = await hostFor(lang)
@@ -913,7 +918,9 @@ async function runFleetActionOnce(
         return { ok, message: ok ? cliStrings(lang).sessKilled(name) : cliStrings(lang).sessKillUnconfirmed(name) }
       }
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
-      return await host.killSession(req.id, req.force === true)
+      // The overloads make a reason mandatory; this only answers a caller that lied to them.
+      if (!endReason) throw new Error('a kill must say why the session ends')
+      return await host.killSession(req.id, req.force === true, endReason)
     // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is
     // refused in words rather than reaching a host verb that does not exist.
     case 'archive':
