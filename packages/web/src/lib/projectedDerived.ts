@@ -88,17 +88,26 @@ export function projectedScope(filters: Filters, activeOnly: boolean, range: { s
  * same tokens from the table, which made the "Usage by model" rows disagree with the headline whenever a
  * harness declared its cost (CUSTO.REGRA-UNICA). A row the projection could not price (cost 0, a model
  * the table does not know) keeps its tokens reported as unpriced, exactly as before.
+ *
+ * HERMES.S2.2: whether the row has a price is the SERVER's answer, never the browser's. A row the projection
+ * could not price comes WITHOUT a `cost` metric (or with every row unpriced and 0), and its tokens are unpriced
+ * whatever the local table says — once `/api/rates` loads the community table into `MODEL_PRICING`, a prefix
+ * match prices an Ollama Cloud `gpt-oss:120b` through `gpt-oss-120b`, and the row became a settled USD 0.00.
+ * Only a cell that does not say (`unpricedRows` absent: an older server) falls back to the table.
  */
 const usageOf = (g: MetricsGroupLike, model: string): ModelUsage => {
+  const cost = g.metrics.cost
   const u: ModelUsage = {
     inputTokens: g.metrics.tokens?.input ?? 0,
     outputTokens: g.metrics.tokens?.output ?? 0,
     cacheReadInputTokens: g.metrics.tokens?.cacheRead ?? 0,
     cacheCreationInputTokens: g.metrics.tokens?.cacheWrite ?? 0,
     webSearchRequests: 0,
-    costUSD: g.metrics.cost?.usd ?? 0,
+    costUSD: cost?.usd ?? 0,
   }
-  return { ...u, costSource: 'mixed', unpricedTokens: u.costUSD === 0 && isUnpricedModel(model) ? usageTokenTotal(u) : 0 }
+  const serverUnpriced = !cost || (cost.usd === 0 && (cost.unpricedRows ?? 0) > 0)
+  const unpriced = serverUnpriced || (u.costUSD === 0 && cost.unpricedRows === undefined && isUnpricedModel(model))
+  return { ...u, costSource: 'mixed', unpricedTokens: unpriced ? usageTokenTotal(u) : 0 }
 }
 
 /**
@@ -268,12 +277,15 @@ export function overlayProjected<D extends LegacyFigures>(legacy: D | null, over
   const covered = coverage.candidates
     .filter(h => overlay.coveredHarnesses!.includes(h))
     .map(h => ({ harnessZero: (overlay.costByHarness![h] ?? 0) === 0, d: coverage.legacyFor(h) }))
-    .filter((c): c is { harnessZero: boolean; d: D } => c.d !== null && c.d.totalCostUSD > 0)
+    // A harness whose legacy total is 0 still counts: its rows can say a model is LOCAL (a known 0), which the
+    // projection reports as unpriced (HERMES.S2.2: `ollama/llama3.2` is free, not unknown).
+    .filter((c): c is { harnessZero: boolean; d: D } => c.d !== null && c.d.totalSessions > 0)
   if (covered.length === 0) return out
   const modelUsage: Record<string, ModelUsage> = { ...out.modelUsage }
   // Decided on the projection's OWN rows, before any correction: a second harness must not read the first one's.
   const projectedZero = (k: string) => (overlay.modelUsage[k]?.costUSD ?? 0) === 0
   let added = 0
+  let changed = false
   for (const { harnessZero, d } of covered) {
     for (const [m, u] of Object.entries(d.modelUsage)) {
       // The legacy adapter keys a model by its route (`upx/fable-5.1`), the projection by the raw id
@@ -286,12 +298,14 @@ export function overlayProjected<D extends LegacyFigures>(legacy: D | null, over
       // and those tokens stop being unpriced. Cost and total move together, so the rows always add up to the top.
       if (!k || !cur || !(harnessZero || projectedZero(k))) continue
       const cost = calcCost(u, m)
-      if (cost <= 0 && unpricedTokens([[m, u]]) === 0) continue
       const unpriced = Math.max(0, (cur.unpricedTokens ?? 0) - usageTokenTotal(u)) + unpricedTokens([[m, u]])
+      // Nothing to add and nothing it settles (a local model's known 0 settles the tokens it carries).
+      if (cost <= 0 && unpriced === (cur.unpricedTokens ?? 0)) continue
       modelUsage[k] = { ...cur, costUSD: calcCost(cur, k) + cost, costSource: cur.costSource ?? 'mixed', unpricedTokens: unpriced }
       added += cost
+      changed = true
     }
   }
-  if (added === 0) return out
+  if (!changed) return out
   return { ...out, modelUsage, totalCostUSD: out.totalCostUSD + added }
 }

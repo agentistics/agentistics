@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.232.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Em Custos, um modelo do Ollama Cloud usado pelo Hermes aparecia com custo zero na tabela "Uso por modelo". Agora ele aparece como desconhecido, porque não tem preço publicado.',
+        en: 'In Costs, an Ollama Cloud model used through Hermes showed a cost of zero in the "Usage by model" table. It now shows as unknown, because it has no published price.',
+      },
+      {
+        pt: 'O total da tabela "Uso por modelo" agora avisa "+ uso sem preço" quando algum modelo não tem preço, como o resumo no topo já fazia.',
+        en: 'The "Usage by model" table total now says "+ unpriced usage" when a model has no price, like the summary at the top already did.',
+      },
+    ],
+  },
   '2.232.0': {
     features: [
       {
