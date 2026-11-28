@@ -41,12 +41,13 @@ export interface TeamRow {
   activeSinceAt?: number
   /** A finished turn waiting on its workers: not waiting on a person (`needsOwner`). */
   waitingOnWorkers?: number
+  afterNotice?: true
 }
 
 const LIVE: ReadonlySet<SessionState> = new Set<SessionState>(['working', 'waiting', 'waiting-approval', 'idle', 'unknown'])
 
 export function isLive(state: SessionState): boolean { return LIVE.has(state) }
-export function isWaitingRow(row: Pick<TeamRow, 'state' | 'waitingOnWorkers'>): boolean { return needsOwner(row) }
+export function isWaitingRow(row: Pick<TeamRow, 'state' | 'waitingOnWorkers' | 'afterNotice'>): boolean { return needsOwner(row) }
 
 export interface Team<R> {
   /** The leader's identity key — what a fold is stored under, so it survives a reopen. */

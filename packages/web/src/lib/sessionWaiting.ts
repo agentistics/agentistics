@@ -17,12 +17,14 @@ type SessionActivity = 'working' | 'waiting' | 'waiting-approval' | 'idle' | 'ex
 export interface WaitingFleetRow {
   state: string
   waitingOnWorkers?: number | undefined
+  /** The finished turn only reacted to a notice from another session: nothing to answer. */
+  afterNotice?: true | undefined
 }
 
 /** The activity a person should read: `idle` for a turn waiting on its workers, the activity otherwise. */
 export function ownerActivity(activity: SessionActivity | undefined, row: WaitingFleetRow | undefined): SessionActivity | undefined {
   if (activity !== 'waiting' || !row) return activity
-  return ownerState({ state: activity, waitingOnWorkers: row.state === 'waiting' ? row.waitingOnWorkers : undefined })
+  return ownerState({ state: activity, waitingOnWorkers: row.state === 'waiting' ? row.waitingOnWorkers : undefined, afterNotice: row.state === 'waiting' ? row.afterNotice : undefined })
 }
 
 /** Does the "waiting" shortcut keep this LIVE session? A question, or a finished turn with no busy worker. */

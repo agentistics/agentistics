@@ -147,13 +147,13 @@ export interface Caveat {
 export const COMPACTION_SINCE: Readonly<Record<string, string>> = { claude: '1.1.0' }
 
 /** The first adapter version, per source, that records human turns (`turn.started`, D22) as events. */
-export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0' }
+export const TURNS_SINCE: Readonly<Record<string, string>> = { claude: '1.3.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0', hermes: '1.0.0' }
 
 /**
  * The first adapter version, per source, that records turn CLOSES (`turn.ended`) and
  * `turn.started.previousAssistantAt` (D25) — what `active_minutes` and `user_response_times` need.
  */
-export const TURN_END_SINCE: Readonly<Record<string, string>> = { claude: '1.5.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0' }
+export const TURN_END_SINCE: Readonly<Record<string, string>> = { claude: '1.5.0', codex: '1.0.0', antigravity: '1.0.0', opencode: '1.0.0', hermes: '1.0.0' }
 
 // ── The result ──────────────────────────────────────────────────────────────────────────────────
 
@@ -467,6 +467,8 @@ export const HARNESS_TOOL_RULES: Readonly<Record<string, HarnessToolRules>> = {
     modelFailuresAreErrors: false,
     toolFailuresAreErrors: false,
   },
+  // adapters/hermes-parse.ts: canonical names; Hermes records no failure flag on a tool result.
+  hermes: { ...DEFAULT_TOOL_RULES, toolFailuresAreErrors: false },
   // kimi-parse.ts: uses_task_agent is `Agent` OR `AgentSwarm` (A3.4); the rest are Claude's names.
   kimi: { ...DEFAULT_TOOL_RULES, taskAgent: n => n === 'Task' || n === 'Agent' || n === 'AgentSwarm', countScope: 'all-agents', subagentsImplyTaskAgent: false },
 }

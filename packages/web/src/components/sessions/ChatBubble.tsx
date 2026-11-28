@@ -23,7 +23,7 @@ import { EMPTY_REASONING_CLOCK } from '../../lib/reasoningRow'
 
 import { OpenCheckinButton } from './CheckinModal'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
 import { codeCopyComponents } from '../chat/CodeCopyPre'
@@ -35,7 +35,8 @@ import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User, Workflow } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { loadClosedFleet, useFleet } from '../../lib/fleet'
-import { surfaceTurnText, parseSystemEvent, isRenameEcho, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
+import { surfaceTurnText, parseSystemEvent, isRenameEcho, systemEventLine, systemEventTitle, systemEventSender, noticeReplyLabel, type SystemEvent } from '../../lib/systemEvent'
+import { Disclosure } from '../Disclosure'
 import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -1342,6 +1343,29 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
       </button>
       {event.kind === 'checkin' && sessionId && <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} />}
     </SystemLine>
+  )
+}
+
+/**
+ * The session's own reaction to a notice from another session, folded under the "Aviso" row: it is not an
+ * answer to the person (owner, 27/11). `fold=false` renders the children untouched.
+ */
+export function NoticeReplyFold({ fold, pt, panelId, children }: { fold: boolean; pt: boolean; panelId: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  if (!fold) return <>{children}</>
+  return (
+    <div data-notice-reply="" style={{ margin: '0 0 4px' }}>
+      <Disclosure
+        open={open}
+        onToggle={() => setOpen(v => !v)}
+        panelId={panelId}
+        panelLabel={noticeReplyLabel(pt)}
+        buttonStyle={{ width: 'auto', padding: '2px 6px', color: 'var(--text-tertiary)', fontSize: 12 }}
+        header={chevron => <>{chevron}<span>{noticeReplyLabel(pt)}</span></>}
+      >
+        {children}
+      </Disclosure>
+    </div>
   )
 }
 

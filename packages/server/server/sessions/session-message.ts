@@ -13,7 +13,7 @@
  * injected so the rules are testable with a fake host.
  */
 
-import { resolveSessionForGroup } from '@agentistics/core'
+import { noticeInstruction, resolveSessionForGroup, type NoticeThreadRef } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
 import { noteMessageTo } from './last-message'
 import { intermediateNote, judgeHandback, type HandbackVerdict } from './handback-intent'
@@ -56,11 +56,14 @@ export interface MessageDeps {
   /** References kept in a worker's briefing follow a replaced parent's current successor. */
   resolveTarget?: (reference: string) => Promise<string>
   /** Type the text into one row through the composer's send path. */
-  prompt: (rowId: string, text: string) => Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+  prompt: (rowId: string, text: string, origin: { from: string; kind: MessageKind }) => Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The task/subtask the sender is filed on, from the registry. */
   senderTask: (senderId: string) => Promise<SenderTask>
-  /** Record the mirror comment on the board. */
-  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind; intermediate?: boolean } }) => Promise<{ ok: boolean }>
+  /**
+   * Record the mirror comment on the board. With `newThread` (kind=notice) the comment OPENS a thread and the
+   * reply names it, so the receiver can be told where its reaction goes.
+   */
+  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind; intermediate?: boolean }; newThread?: { title: string; kind: 'notice' } }) => Promise<{ ok: boolean; threadId?: string }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   /**
    * Move the subtask to review. ENTREGA.GARANTIDA S2a: resolves `{ held }` — the guard's own sentence — when the store REFUSED
@@ -95,7 +98,7 @@ export function handbackFlowEvent(senderId: string, to: string, at: number, file
 }
 
 export type MessageReply =
-  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean; /** S2a: the move to review was REFUSED (handback held): its code and what is missing. */ held?: { code: string; missing: string[] } }
+  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** kind=notice: the thread opened for it on the sender's task. */ threadId?: string;/** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean; /** S2a: the move to review was REFUSED (handback held): its code and what is missing. */ held?: { code: string; missing: string[] } }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -118,6 +121,13 @@ const fail = (code: string, message?: string, matches?: string[]): MessageReply 
 
 /** The header word of a `notice`: it tells the receiving model, in the message itself, that no answer is expected. */
 export const NOTICE_HEADER_KIND = 'notice — no reply needed'
+
+/** The title of a notice's thread: its first line, cut short (the thread store trims it again). */
+export function noticeThreadTitle(body: string): string {
+  const first = body.split('\n').find(l => l.trim())?.trim() ?? ''
+  const line = first.length > 80 ? `${first.slice(0, 79)}…` : first
+  return line || 'Notice'
+}
 
 /** The one-line header every delivered message starts with. */
 export function messageHeader(senderId: string, kind: MessageKind): string {
@@ -154,7 +164,27 @@ export async function sendSessionMessage(
   const prev = lastSent.get(pair)
   if (prev !== undefined && t - prev < MESSAGE_MIN_GAP_MS) return fail('rate_limited')
 
-  const sent = await deps.prompt(target.id, `${messageHeader(senderId, kind)}\n${body}`)
+  const filed = await deps.senderTask(senderId).catch((): SenderTask => ({}))
+  let mirrored = false
+  // A NOTICE is recorded first, as a THREAD on the sender's task, so the text typed into the receiver can
+  // name the one place a reaction goes (owner, 27/11: the reply belongs in the notice's thread, never in a
+  // turn addressed to the person). No task, or the board refused: the notice still goes, minus the thread.
+  let noticeThread: NoticeThreadRef | undefined
+  if (kind === 'notice' && filed.taskId) {
+    const res = await deps.comment(filed.taskId, {
+      author: `session:${senderId.slice(0, 8)}`,
+      body,
+      ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
+      session: senderId,
+      message: { to: target.id, kind },
+      newThread: { title: noticeThreadTitle(body), kind: 'notice' },
+    }).catch((): { ok: boolean; threadId?: string } => ({ ok: false }))
+    mirrored = res.ok
+    if (res.ok && res.threadId) noticeThread = { taskId: filed.taskId, threadId: res.threadId }
+  }
+
+  const typed = kind === 'notice' ? `${body}\n${noticeInstruction(noticeThread)}` : body
+  const sent = await deps.prompt(target.id, `${messageHeader(senderId, kind)}\n${typed}`, { from: senderId, kind })
   if (!sent.ok) {
     // Three different facts, three different answers: a dialog is open (nothing was typed — retry
     // after it is answered), the pane is gone (a real end), or the keys went in and the submit could
@@ -167,13 +197,11 @@ export async function sendSessionMessage(
   lastSent.set(pair, t)
   noteMessageTo(target.id, t, { from: senderId, kind })
 
-  let mirrored = false
   let held: { held: string; code: string; missing: string[] } | undefined
   // FLUXO.AVISOS 8: an `awaiting` handback — or one whose text says it is part N of M — is one slice of a longer piece. It is
   // recorded and delivered, but it does not move the subtask to review and is not listed as delivered in the check-in.
   const verdict = kind === 'handback' ? judgeHandback(body, awaiting) : { intermediate: false } as HandbackVerdict
-  const filed = await deps.senderTask(senderId).catch((): SenderTask => ({}))
-  if (filed.taskId) {
+  if (filed.taskId && kind !== 'notice') {
     const res = await deps.comment(filed.taskId, {
       author: `session:${senderId.slice(0, 8)}`,
       body,
@@ -196,7 +224,7 @@ export async function sendSessionMessage(
   if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(eventAwaiting ? { awaiting: eventAwaiting } : {}) })).catch(() => {})
   const note = verdict.source === 'inferred' && verdict.marker ? ` ${intermediateNote(verdict.marker)}` : ''
   const heldNote = held ? ` Handback held: the piece stays where it was — ${held.held}` : ''
-  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}${heldNote}`, mirrored, ...(verdict.intermediate ? { intermediate: true } : {}), ...(held ? { held: { code: held.code, missing: held.missing } } : {}) }
+  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}${heldNote}`, mirrored, ...(noticeThread ? { threadId: noticeThread.threadId } : {}), ...(verdict.intermediate ? { intermediate: true } : {}), ...(held ? { held: { code: held.code, missing: held.missing } } : {}) }
 }
 
 export function messageStatus(out: MessageReply): number {
@@ -222,9 +250,9 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       // or conversation id only, and redirects only a retired leader to a LIVE successor.
       return messageTargetFor(await readRegistry(), reference)
     },
-    prompt: async (rowId, text) => {
+    prompt: async (rowId, text, origin) => {
       const { runFleetAction } = await import('./fleet-web')
-      const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })
+      const out = await runFleetAction('en', { action: 'prompt', id: rowId, text }, origin)
       return { ok: out.ok, ...(out.message ? { message: out.message } : {}), ...(out.failure ? { failure: out.failure } : {}) }
     },
     senderTask: async id => {
@@ -235,7 +263,7 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
     comment: async (taskId, c) => {
       const { addComment } = await import('./task-web')
       const res = await addComment(taskId, c)
-      return { ok: res.ok }
+      return res.ok ? { ok: true, ...(res.threadId ? { threadId: res.threadId } : {}) } : { ok: false }
     },
     handbackSubtask: async (subtaskId, senderId) => {
       const tw = await import('./task-web')

@@ -102,7 +102,7 @@ export function SessionLine({
   const goTo = useContext(GoToSessionContext)
   const waiting = needsOwner(session)
   const workers = session.waitingOnWorkers ?? 0
-  const statusKind = lineStatusKind(session.state, session.activeSignal, fell, workers)
+  const statusKind = lineStatusKind(session.state, session.activeSignal, fell, workers, session.afterNotice === true)
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearLongPress = () => { if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null } }
   const canMenu = !!verbs && verbs.length > 0 && !!onOpenMenu

@@ -593,7 +593,7 @@ function staleText(name: string, place: string, waited: string, lang: 'pt' | 'en
  * would make the module remember something across a page it no longer belongs to.
  */
 export function fleetActivityStates(
-  rows: readonly { id: string; state: string; waitingOnWorkers?: number }[],
+  rows: readonly { id: string; state: string; waitingOnWorkers?: number; afterNotice?: true }[],
 ): Record<string, SessionActivity> {
   const out: Record<string, SessionActivity> = {}
   for (const r of rows) {
@@ -621,13 +621,13 @@ let unconfirmed: Record<string, SessionActivity> = {}
 /** Observed terminal transitions awaiting an in-flight switch, including a vanished source. */
 const pendingExits = new Map<string, FleetNotifyRow>()
 
-type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string; state: string; waitingOnWorkers?: number; title?: string; cwd?: string; harness?: string; model?: string }
+type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string; state: string; waitingOnWorkers?: number; afterNotice?: true; title?: string; cwd?: string; harness?: string; model?: string }
 
 /**
  * The rows the "not opened for a while" clocks read: a turn waiting on its workers reads as `idle`
  * (`ownerState`), so its clock never runs while the workers do and starts when the last one stops.
  */
-export function staleClockRows<R extends { state: string; waitingOnWorkers?: number }>(rows: readonly R[]): Array<Omit<R, 'state'> & { state: string }> {
+export function staleClockRows<R extends { state: string; waitingOnWorkers?: number; afterNotice?: true }>(rows: readonly R[]): Array<Omit<R, 'state'> & { state: string }> {
   return rows.map(r => ({ ...r, state: ownerState(r) }))
 }
 

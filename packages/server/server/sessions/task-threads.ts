@@ -65,7 +65,7 @@ export async function openThread(ref: string, o: OpenThreadInput): Promise<
   if (!title) return { ok: false, reason: 'bad_title', message: 'A thread needs a title.' }
   const kind: ThreadKind = o.kind ?? 'topic'
   if (o.session && !canSessionOpenThread(kind)) {
-    return { ok: false, reason: 'session_kind', message: 'A session may open a thread only for a handback or a block.' }
+    return { ok: false, reason: 'session_kind', message: 'A session may open a thread only for a handback, a block or a notice.' }
   }
   const w = await loadTaskBoard()
   const task = findTask(ref, w.book.tasks)

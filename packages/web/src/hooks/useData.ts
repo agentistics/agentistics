@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from 'react'
-import { accumulateUsageCost } from '@agentistics/core'
+import { accumulateUsageCost, hasModelCost } from '@agentistics/core'
 import { activeInDays, activeInWindow, countsByDay, countsInDays, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, workedDays, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
 import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByHarnesses, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
@@ -919,7 +919,8 @@ export interface HarnessSummary {
   peakTokenDay: { date: string; tokens: number } | null  // null if no token data
   peakSessionCost: number | null  // null if no cost data / claude
   /** Per-model token + cost breakdown, sorted by costUSD desc. Empty when no model data. */
-  models: { model: string; inputTokens: number; outputTokens: number; tokens: TokenBreakdown; costUSD: number }[]
+  /** `priced: false` = no declared cost and no table price: the row reads unknown, never 0. */
+  models: { model: string; inputTokens: number; outputTokens: number; tokens: TokenBreakdown; costUSD: number; priced?: boolean }[]
   /**
    * Blended cost per 1M tokens, over ALL FOUR counters.
    *
@@ -1065,6 +1066,7 @@ export function summarizeSessions(list: SessionMeta[], hasCost: boolean, hasToke
       outputTokens: u.outputTokens,
       tokens: usageTokens(u),
       costUSD: hasCost ? calcCost(u, model) : 0,
+      priced: hasModelCost(u, model),
     }))
     .sort((a, b) => b.costUSD - a.costUSD)
 
@@ -1157,6 +1159,7 @@ export function claudeSummaryFromStatsCache(
       outputTokens: u.outputTokens ?? 0,
       tokens: usageTokens(u),
       costUSD: calcCost(u, model),
+      priced: hasModelCost(u, model),
     }))
     .sort((a, b) => b.costUSD - a.costUSD)
 

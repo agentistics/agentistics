@@ -161,6 +161,8 @@ export interface CliStrings {
   sessBackground: string
   /** The state word of a finished turn that waits on `n` busy workers of its own — nothing to answer. */
   sessWaitingWorkers: (n: number) => string
+  /** The state word of a finished turn that only reacted to a notice from another session — nothing to answer. */
+  sessAfterNotice: string
   /** Said on a session whose harness has no probed approval markers. */
   sessApprovalBlind: (harness: string) => string
   /**
@@ -649,6 +651,7 @@ const EN: CliStrings = {
   },
   sessBackground: 'subagent',
   sessWaitingWorkers: (n: number) => `waiting on ${n} ${n === 1 ? 'worker' : 'workers'}`,
+  sessAfterNotice: 'read a notice',
   sessApprovalBlind: (harness: string) =>
     `agentop has no verified screen markers for ${harness}, so a blocking question here shows as "needs you" like any other pause.`,
   sessDirGone: 'this directory no longer exists — a removed worktree, most likely. Reopening will not work until it is back.',
@@ -1090,6 +1093,7 @@ const PT: CliStrings = {
   },
   sessBackground: 'subagente',
   sessWaitingWorkers: (n: number) => `esperando ${n} ${n === 1 ? 'worker' : 'workers'}`,
+  sessAfterNotice: 'leu um aviso',
   sessApprovalBlind: (harness: string) =>
     `o agentop não tem marcadores de tela verificados para ${harness}, então uma pergunta bloqueante aqui aparece como "precisa de você", como qualquer outra pausa.`,
   sessDirGone: 'este diretório não existe mais — provavelmente uma worktree removida. Reabrir não vai funcionar enquanto ele não voltar.',

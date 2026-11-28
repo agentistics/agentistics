@@ -1,4 +1,4 @@
-import { parseInjectedHeader, roleLine, slashInvocation, unwrapAllPasted } from '@agentistics/core'
+import { parseInjectedHeader, roleLine, slashInvocation, stripNoticeInstruction, unwrapAllPasted } from '@agentistics/core'
 
 /**
  * systemEvent.ts — PURE: recognise a message agentistics itself injected into a session.
@@ -89,8 +89,29 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
   if (what === 'handback' || what === 'block') return { kind: what, sender: h.sender, body }
   if (what === 'question') return { kind: 'session-question', sender: h.sender, body }
   // `notice — no reply needed`: an FYI from another session (a leader handover, an id change) — never a delivery.
-  if (/^notice\b/.test(what)) return { kind: 'session-notice', sender: h.sender, body }
+  // The instruction line is for the receiving model (where its reaction goes), not for the person.
+  if (/^notice\b/.test(what)) return { kind: 'session-notice', sender: h.sender, body: stripNoticeInstruction(body) }
   return { kind: 'session-note', sender: h.sender, label: what, body }
+}
+
+/**
+ * Indexes of the assistant turns that REACTED to a notice from another session: every assistant turn after
+ * a `session-notice` row, up to the next user turn. Owner, 27/11: that reaction is not a reply to the person,
+ * so the chat draws it folded under the "Aviso" row instead of as a normal answer.
+ */
+export function noticeReplyIndexes(turns: readonly { role: 'user' | 'assistant'; text: string }[]): Set<number> {
+  const out = new Set<number>()
+  let inNotice = false
+  turns.forEach((t, i) => {
+    if (t.role === 'user') { inNotice = parseSystemEvent(t.text)?.kind === 'session-notice'; return }
+    if (inNotice) out.add(i)
+  })
+  return out
+}
+
+/** The fold's header over a notice reaction. */
+export function noticeReplyLabel(pt: boolean): string {
+  return pt ? 'Reação ao aviso · não é para você' : 'Reaction to the notice · not addressed to you'
 }
 
 /** Session titles are shown without the role prefix used by the sidebar. */

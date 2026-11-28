@@ -14,11 +14,11 @@
  * external `unknown` process) are not Nay sessions agentop hosts and are left out.
  */
 
-import { isNayCwd, isWaitingOnWorkers, sessionIdentityKey } from '@agentistics/core'
+import { isAfterNotice, isNayCwd, isWaitingOnWorkers, sessionIdentityKey } from '@agentistics/core'
 
 export type NaySectionId = 'working' | 'waiting' | 'ended'
 
-export interface NayListRow { id: string; conversationId?: string | undefined; cwd?: string | undefined; state: string; startedAt?: number; waitingOnWorkers?: number }
+export interface NayListRow { id: string; conversationId?: string | undefined; cwd?: string | undefined; state: string; startedAt?: number; waitingOnWorkers?: number; afterNotice?: true }
 
 export const NAY_SECTION_ORDER: readonly NaySectionId[] = ['working', 'waiting', 'ended']
 
@@ -35,7 +35,7 @@ export function naySectionOf(state: string): NaySectionId | null {
 const RANK: Record<NaySectionId, number> = { working: 0, waiting: 1, ended: 2 }
 
 /** A conversation waiting on its workers is working, never "waiting for you". */
-const rowSection = (r: NayListRow): NaySectionId | null => naySectionOf(isWaitingOnWorkers(r) ? 'working' : r.state)
+const rowSection = (r: NayListRow): NaySectionId | null => naySectionOf(isWaitingOnWorkers(r) ? 'working' : isAfterNotice(r) ? 'working' : r.state)
 
 export function naySections<R extends NayListRow>(rows: readonly R[]): Record<NaySectionId, R[]> {
   const best = new Map<string, R>()

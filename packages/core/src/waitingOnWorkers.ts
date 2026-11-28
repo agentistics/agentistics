@@ -72,6 +72,17 @@ export interface OwnerWaitRow<S extends string = string> {
   state: S
   /** Busy workers this finished turn is waiting on. Absent = none. */
   waitingOnWorkers?: number | undefined
+  /**
+   * The turn that just ended was set off by a `notice` from another session (`agentistics_session_message`
+   * kind=notice — a leader handover, an id change). A notice asks nothing, so the reaction to it is not a
+   * question for the owner (owner, 27/11: "esses avisos aparecem como pergunta, não deveria").
+   */
+  afterNotice?: boolean | undefined
+}
+
+/** True while the finished turn only reacted to an informational notice: nothing to answer. */
+export function isAfterNotice(row: OwnerWaitRow): boolean {
+  return row.state === 'waiting' && row.afterNotice === true
 }
 
 /** True while the session's turn ended and it is its workers, not a person, it waits for. */
@@ -81,7 +92,7 @@ export function isWaitingOnWorkers(row: OwnerWaitRow): boolean {
 
 /** Does this row want a person? The ONE predicate every "needs you" counter reads. */
 export function needsOwner(row: OwnerWaitRow): boolean {
-  return row.state === 'waiting-approval' || (row.state === 'waiting' && !isWaitingOnWorkers(row))
+  return row.state === 'waiting-approval' || (row.state === 'waiting' && !isWaitingOnWorkers(row) && !isAfterNotice(row))
 }
 
 /**
@@ -89,5 +100,5 @@ export function needsOwner(row: OwnerWaitRow): boolean {
  * no notice fires, and the later `idle -> waiting` (the last worker stopped) is a transition.
  */
 export function ownerState<S extends string>(row: OwnerWaitRow<S>): S | 'idle' {
-  return isWaitingOnWorkers(row) ? 'idle' : row.state
+  return isWaitingOnWorkers(row) || isAfterNotice(row) ? 'idle' : row.state
 }

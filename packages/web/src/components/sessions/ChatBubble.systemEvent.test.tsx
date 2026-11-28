@@ -18,7 +18,7 @@ mock.module('../../lib/fleet', () => ({
   ...realFleet,
   useFleet: () => ({ fleet: { rows: [{ id: 'ab12cdef', conversationId: 'c1', title: '[ LEADER ] - Leader Xyzzy' }, { id: 'closed:claude:ended-conversation', conversationId: 'ended-conversation', title: '[ LÍDER ] - Ended Xyzzy', state: 'closed' }] } }),
 }))
-const { ChatBubble, SystemEventRow } = await import('./ChatBubble')
+const { ChatBubble, NoticeReplyFold, SystemEventRow } = await import('./ChatBubble')
 
 const turn = (text: string) => ({ role: 'user', text } as never)
 
@@ -241,6 +241,33 @@ test('surface turns render the person bubble and mic chip without the transport 
   expect(html).not.toContain('Internal transport')
   expect(html).not.toContain('from agentistics')
   expect(html).not.toContain('aria-expanded="false"')
+})
+
+test('a reaction to a notice is folded under a closed header, pt and en; an ordinary reply is not', () => {
+  for (const [lang, label] of [['pt', 'Reação ao aviso · não é para você'], ['en', 'Reaction to the notice · not addressed to you']] as const) {
+    const html = renderToStaticMarkup(
+      <NoticeReplyFold fold pt={lang === 'pt'} panelId="np-1">
+        <ChatBubble turn={{ role: 'assistant', text: 'xyzzy-reaction-marker' }} lang={lang} harness="claude" />
+      </NoticeReplyFold>,
+    )
+    expect(html).toContain(label)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain('xyzzy-reaction-marker')
+  }
+  const plain = renderToStaticMarkup(
+    <NoticeReplyFold fold={false} pt panelId="np-2"><ChatBubble turn={{ role: 'assistant', text: 'xyzzy-normal-reply' }} lang="pt" harness="claude" /></NoticeReplyFold>,
+  )
+  expect(plain).toContain('xyzzy-normal-reply')
+  expect(plain).not.toContain('Reação ao aviso')
+})
+
+test('a notice row shows "Aviso" and hides the instruction meant for the model', () => {
+  const text = '[from session ab12 · notice — no reply needed]\nxyzzy-notice-body\n(notice: no reply to the user. If you must react, post ONE comment in its thread — agentistics_task_comment ref=t1 threadId=th1 — and end your turn with no chat text addressed to the user.)'
+  const ev = parseSystemEvent(text)!
+  const html = renderToStaticMarkup(<SystemEventRow event={ev} pt defaultOpen />)
+  expect(html).toContain('Aviso')
+  expect(html).toContain('xyzzy-notice-body')
+  expect(html).not.toContain('threadId=th1')
 })
 
 test('a flow nudge renders as a COLLAPSED system card with the flow icon and name — never a user bubble', () => {

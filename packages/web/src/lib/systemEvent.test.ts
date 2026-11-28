@@ -1,6 +1,6 @@
-import { roleChangeNote, roleLine } from '@agentistics/core'
+import { noticeInstruction, roleChangeNote, roleLine } from '@agentistics/core'
 import { describe, expect, test } from 'bun:test'
-import { parseSystemEvent, systemEventLine, systemEventSender, systemEventTitle } from './systemEvent'
+import { noticeReplyIndexes, noticeReplyLabel, parseSystemEvent, systemEventLine, systemEventSender, systemEventTitle } from './systemEvent'
 
 describe('parseSystemEvent', () => {
   test('a session message wrapped as pasted content by the harness is still a system event', () => {
@@ -218,4 +218,38 @@ test('surface-submitted turns are user messages and strip only leading transport
 
 test('a peer wrapper containing a surface header remains a system event', () => {
   expect(parseSystemEvent('<agent-message>[from agentistics · surface]\nhello</agent-message>')?.kind).toBe('notice')
+})
+
+describe('notice → thread (owner, 27/11)', () => {
+  const notice = `[from session 4c5cb63d · notice — no reply needed]\nO líder do Motor mudou\n${noticeInstruction({ taskId: 't1', threadId: 'th1' })}`
+
+  test('the instruction line is for the model: the shown body drops it', () => {
+    expect(parseSystemEvent(notice)).toEqual({ kind: 'session-notice', sender: '4c5cb63d', body: 'O líder do Motor mudou' })
+    expect(parseSystemEvent(`[from session x · notice — no reply needed]\nfyi\n${noticeInstruction()}`)?.body).toBe('fyi')
+  })
+
+  test('the assistant turns after a notice, up to the next user turn, are its reaction', () => {
+    const turns = [
+      { role: 'user' as const, text: 'hello' },
+      { role: 'assistant' as const, text: 'hi' },
+      { role: 'user' as const, text: notice },
+      { role: 'assistant' as const, text: 'O líder mudou de novo…' },
+      { role: 'assistant' as const, text: 'second part' },
+      { role: 'user' as const, text: 'next person message' },
+      { role: 'assistant' as const, text: 'normal reply' },
+    ]
+    expect([...noticeReplyIndexes(turns)]).toEqual([3, 4])
+  })
+
+  test('older kinds do not fold their replies', () => {
+    for (const kind of ['handback', 'block', 'question']) {
+      const turns = [{ role: 'user' as const, text: `[from session ab · ${kind}]\nx` }, { role: 'assistant' as const, text: 'answer' }]
+      expect(noticeReplyIndexes(turns).size).toBe(0)
+    }
+  })
+
+  test('the fold header says it is not addressed to the person, pt and en', () => {
+    expect(noticeReplyLabel(true)).toBe('Reação ao aviso · não é para você')
+    expect(noticeReplyLabel(false)).toBe('Reaction to the notice · not addressed to you')
+  })
 })
