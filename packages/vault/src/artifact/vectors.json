@@ -1,0 +1,52 @@
+{
+  "note": "Compatibility vectors. All key material is fixed TEST data (not secrets). Binary values are hex unless the field is a wire object (base64).",
+  "chunk": {
+    "dek": "a25ce99b365b892a5e52179ccce36607f5b316e372156ab6c5cdbeaac3dff053",
+    "objectId": "snapshot-0001",
+    "chunkSize": 16,
+    "plaintext": "54686520717569636b2062726f776e20666f78206a756d7073206f76657220746865206c617a7920646f672e",
+    "chunks": [
+      "755e7ab442c45a4d9296c62a738e26453882261c5bdf3f0a5f4d2737d7266500",
+      "0777407629e206c706ebe957c3916af393983ec017ec5ac4a8ea0fd7ccb0e9f6",
+      "18c69401922119f29909329f9fda06294bc3ce934701818de22c9211"
+    ],
+    "emptyObjectChunk": "8d4ddd61947914edd64bfb52ad621e04"
+  },
+  "dekWrap": {
+    "dek": "a25ce99b365b892a5e52179ccce36607f5b316e372156ab6c5cdbeaac3dff053",
+    "senderPrivate": "5317c558ea37cc71290f92310ddae107b75bc1bb3885b5258382b557fb93c994",
+    "senderPublic": "f281f578b76cc7b3aa0aa9504ce3c6acf5253bc1f790cf15ed3b79749e062d00",
+    "backupPrivate": "e1fc913ec46bfb74febb9fdb829e059c836014cd2be04a134da6c3843103fe9f",
+    "backupPublic": "0f154a1fab461a70191f9d8fc93b34fee7ccdac0eb9e724f27a9260097c63559",
+    "ephemeralPrivate": "45e10d69c4ae4e3ad452aa3a4865bb702825d4cba2b9a94769761ab1a6c6b53c",
+    "nonce": "4cc6b7b9f5cddf28b854f98c",
+    "wrap": {
+      "v": 1,
+      "senderPublicKey": "8oH1eLdsx7OqCqlQTOPGrPUlO8H3kM8V7Tt5dJ4GLQA=",
+      "ephemeralPublicKey": "OS9BMmktf+ef1/PcfUfdMOnmpK+33tkOScGVnNNvgRA=",
+      "nonce": "TMa3ufXN3yi4VPmM",
+      "ct": "Jzhs2Rb5ucE7Qq+Efm/Woz37qQpmFvltzqBzlyh6yC0fxxXjXHePilBE4Dn2SUXM"
+    }
+  },
+  "senderCert": {
+    "backupPrivate": "e1fc913ec46bfb74febb9fdb829e059c836014cd2be04a134da6c3843103fe9f",
+    "backupPublic": "0f154a1fab461a70191f9d8fc93b34fee7ccdac0eb9e724f27a9260097c63559",
+    "senderPublic": "f281f578b76cc7b3aa0aa9504ce3c6acf5253bc1f790cf15ed3b79749e062d00",
+    "cert": {
+      "v": 1,
+      "senderPublicKey": "8oH1eLdsx7OqCqlQTOPGrPUlO8H3kM8V7Tt5dJ4GLQA=",
+      "cert": "i4hABlO8epPVITD6gQN3IhL8RU9hqO4KmdpOGILAajw="
+    }
+  },
+  "recovery": {
+    "entropy": "f84b5e2976ee29eba136a07264a7f13de5ddd503141fc2f7eddbe94b02c95bb1",
+    "backupPrivate": "e1fc913ec46bfb74febb9fdb829e059c836014cd2be04a134da6c3843103fe9f",
+    "backupPublic": "0f154a1fab461a70191f9d8fc93b34fee7ccdac0eb9e724f27a9260097c63559",
+    "nonce": "7bc79d50c8b70c67a2111dac",
+    "wrap": {
+      "v": 1,
+      "nonce": "e8edUMi3DGeiER2s",
+      "ct": "eWhPn9T/8ywxYEgBcx80okTT+FuZjN2EtCt6DMl1tgxcH2DZRCLrFXvEI8MkVtCu"
+    }
+  }
+}
