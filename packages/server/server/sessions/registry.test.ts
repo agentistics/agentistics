@@ -508,6 +508,23 @@ describe('the renamed-session title survives a round trip through the file', () 
   })
 })
 
+describe('the notice mark survives a round trip through the file (SESSAO.AVISO-NA-THREAD)', () => {
+  it('lastMessage is read back, a malformed one is dropped, and null clears it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'registry-lastmsg-'))
+    try {
+      const reg = createSessionRegistry(join(dir, 'managed-sessions.json'))
+      await reg.add({ id: 'a1', harness: 'claude', cwd: '/w', createdAt: '2026-10-05T00:00:00Z' } as never)
+      expect(await reg.patch('a1', { lastMessage: { at: '2026-11-27T19:45:00.000Z', from: 'w1', kind: 'notice' } })).toBe(true)
+      expect((await reg.read())[0]!.lastMessage).toEqual({ at: '2026-11-27T19:45:00.000Z', from: 'w1', kind: 'notice' })
+      await reg.patch('a1', { lastMessage: { at: 'yesterday' } })
+      expect((await reg.read())[0]!.lastMessage).toBeUndefined()
+      await reg.patch('a1', { lastMessage: { at: '2026-11-27T19:46:00.000Z' } })
+      await reg.patch('a1', { lastMessage: null })
+      expect((await reg.read())[0]!.lastMessage).toBeUndefined()
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+})
+
 describe('F2.0 — the structured driver and the protocol-stated link survive a round trip', () => {
   it('structuredDriver and conversationLinkVia protocol-stated are read back', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'registry-structured-'))

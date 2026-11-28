@@ -233,8 +233,9 @@ const OPENCODE_PATHS = opencodePaths(process.env, HOME_DIR)
 export const OPENCODE_DIR = OPENCODE_PATHS.dir
 export const OPENCODE_DB_PATH = OPENCODE_PATHS.dbPath
 
-// Hermes (Nous Research). DECLARED only: detection of its home, no adapter reads it yet. HERMES_HOME overrides.
-export const HERMES_DIR = process.env.HERMES_HOME ?? join(HOME_DIR, '.hermes')
+// Hermes (Nous Research): `adapters/hermes.ts` reads state.db under its home. HERMES_HOME overrides.
+export const HERMES_DIR = process.env.HERMES_HOME || join(HOME_DIR, '.hermes')
+export const HERMES_DB_PATH = join(HERMES_DIR, 'state.db')
 
 export const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_DIR ?? join(GEMINI_DIR, 'antigravity-cli')
 export const ANTIGRAVITY_BRAIN_DIR = join(ANTIGRAVITY_DIR, 'brain')

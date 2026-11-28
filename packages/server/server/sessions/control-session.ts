@@ -180,10 +180,13 @@ export function toControlSession(
     // still has work running, which is the reading this mark exists to correct.
     stateLabel: state === 'waiting' && v.waitingOnWorkers
       ? s.sessWaitingWorkers(v.waitingOnWorkers)
+      : state === 'waiting' && v.afterNotice
+        ? s.sessAfterNotice
       : v.background
         ? `${stateLabel(state, s, v.status === 'external')} · ${s.sessBackground}`
         : stateLabel(state, s, v.status === 'external'),
     ...(state === 'waiting' && v.waitingOnWorkers ? { waitingOnWorkers: v.waitingOnWorkers } : {}),
+    ...(state === 'waiting' && v.afterNotice ? { afterNotice: true as const } : {}),
     // The machine-readable half, for a surface that wants to style it rather than read it.
     ...(v.background ? { background: true } : {}),
     actionable: v.status !== 'external' && v.status !== 'closed',

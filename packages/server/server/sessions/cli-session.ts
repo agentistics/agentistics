@@ -64,7 +64,7 @@ import { loadHarnessSessions } from './harness-sessions'
 import { createSessionsPoller, type SessionSnapshot } from './sessions-host'
 import { loadNativeFleet, resolveNativeRef, runNativeVerb } from './native-fleet'
 import { isServerProcess, readServerSnapshot } from './shared-snapshot'
-import { needsAttention, waitingOnItsWorkers, type SessionView } from './session-view'
+import { needsAttention, asksNoOne, type SessionView } from './session-view'
 import { planTaskReopen, taskReopenSucceeded } from './task-reopen'
 import { AGENTISTICS_DATA_DIR, TASKS_FILE, PORT } from '../config'
 import { createTaskStore } from './task-store'
@@ -1467,7 +1467,7 @@ async function list(backend: SessionBackend, json = false): Promise<number> {
     console.log(`${id}\t${stateWord(v)}\t${v.harness ?? '?'}\t${v.label ?? ''}\t${v.cwd}`)
   }
 
-  const waiting = snap.sessions.filter(v => needsAttention(v.activity) && !waitingOnItsWorkers(v))
+  const waiting = snap.sessions.filter(v => needsAttention(v.activity) && !asksNoOne(v))
   if (waiting.length > 0) {
     console.log(`\n${waiting.length} session(s) waiting on you: ${waiting.map(v => v.label ?? v.id).join(', ')}`)
   }

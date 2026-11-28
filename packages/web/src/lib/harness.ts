@@ -390,26 +390,39 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
   },
   hermes: {
     blurb: {
-      en: 'Hermes (Nous Research) is DECLARED only: it is listed, but no live run has verified it yet and no session data is read from it.',
-      pt: 'O Hermes (Nous Research) está apenas DECLARADO: aparece na lista, mas nenhuma execução ao vivo o verificou ainda e nenhum dado de sessão é lido dele.',
+      en: 'Hermes (Nous Research): sessions, tokens, cost, model, tools and active time, read from its local database.',
+      pt: 'Hermes (Nous Research): sessões, tokens, custo, modelo, ferramentas e tempo ativo, lidos do banco local dele.',
     },
     format: {
-      en: 'Expected: a read-only SQLite store (state.db). Derived from its source, not recorded from a real install.',
-      pt: 'Esperado: um banco SQLite somente leitura (state.db). Derivado do código-fonte, não gravado de uma instalação real.',
+      en: 'A SQLite database (state.db), opened read-only. Its layout was taken from Hermes source code and has not been checked against a real install yet.',
+      pt: 'Um banco SQLite (state.db), aberto somente para leitura. O formato foi tirado do código-fonte do Hermes e ainda não foi conferido numa instalação real.',
     },
     retention: {
       en: 'Unknown: not measured on a live install.',
       pt: 'Desconhecida: não medida em uma instalação real.',
     },
-    source: ['$HERMES_HOME (default ~/.hermes)'],
-    contains: [],
-    missing: [{
-      item: { en: 'Everything', pt: 'Tudo' },
-      why: { en: 'No adapter reads Hermes yet, so no token, cost, model or tool figure is shown.', pt: 'Nenhum adaptador lê o Hermes ainda, então nenhum número de tokens, custo, modelo ou ferramenta é exibido.' },
-    }],
+    source: ['$HERMES_HOME/state.db (default ~/.hermes/state.db)'],
+    contains: [
+      { en: 'Sessions, messages and their project folder', pt: 'Sessões, mensagens e a pasta do projeto' },
+      { en: 'Input, output and cache tokens per session', pt: 'Tokens de entrada, saída e cache por sessão' },
+      { en: 'The cost Hermes states; otherwise the model price table', pt: 'O custo que o Hermes informa; sem ele, a tabela de preços do modelo' },
+      { en: 'The model of each session', pt: 'O modelo de cada sessão' },
+      { en: 'Tool calls and git commits', pt: 'Chamadas de ferramenta e commits' },
+      { en: 'Active time per turn', pt: 'Tempo ativo por turno' },
+    ],
+    missing: [
+      {
+        item: { en: 'Tool errors', pt: 'Erros de ferramenta' },
+        why: { en: 'Hermes does not record whether a tool call failed.', pt: 'O Hermes não registra se uma chamada de ferramenta falhou.' },
+      },
+      {
+        item: { en: 'Context gauge and git lines', pt: 'Medidor de contexto e linhas de git' },
+        why: { en: 'The database does not record the context window or the full set of line changes.', pt: 'O banco não registra a janela de contexto nem todas as linhas alteradas.' },
+      },
+    ],
     note: {
-      en: 'Status: declared only, not live-verified. It cannot start sessions yet.',
-      pt: 'Situação: só declarado, não verificado ao vivo. Ainda não inicia sessões.',
+      en: 'Figures are per session, not per day: a session counts on the day it started.',
+      pt: 'Os números são por sessão, não por dia: a sessão conta no dia em que começou.',
     },
     pricingUrl: 'https://openrouter.ai/models',
   },

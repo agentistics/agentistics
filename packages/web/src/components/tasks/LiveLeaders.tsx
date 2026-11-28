@@ -205,7 +205,7 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
   const facts = [leaderRuntime(l, runtime, pt), account ? `${pt ? 'conta' : 'account'} ${account}` : null].filter(Boolean).join(' · ')
   return (
     <div data-live-leader={l.id} data-open={open ? '1' : '0'} style={{ ...surface, padding: '7px 10px', minWidth: 0 }}>
-      <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${l.waitingOnWorkers ? lineStatusWord('workers', pt, l.waitingOnWorkers) : leaderState(l.queued ? 'queued' : l.state, pt)}`}
+      <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${l.waitingOnWorkers ? lineStatusWord('workers', pt, l.waitingOnWorkers) : l.afterNotice ? lineStatusWord('notice', pt) : leaderState(l.queued ? 'queued' : l.state, pt)}`}
         style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: mobile ? 44 : undefined, background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12.5, textAlign: 'left', minWidth: 0 }}>
         <Dot color={dot} size={8} />
         <b style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}><Crown size={12} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span></b>

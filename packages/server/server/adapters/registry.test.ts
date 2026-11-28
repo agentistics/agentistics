@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { getEnabledAdapters } from './types'
+import { getEnabledAdapters, loadHermesAdapter } from './types'
 import { claudeAdapter } from './claude'
 import { codexAdapter } from './codex'
 import { geminiAdapter } from './gemini'
@@ -7,8 +7,9 @@ import { copilotAdapter } from './copilot'
 import { antigravityAdapter } from './antigravity'
 import { kimiAdapter } from './kimi'
 import { opencodeAdapter } from './opencode'
+const hermesAdapter = await loadHermesAdapter()
 
-const KNOWN_HARNESS_IDS = new Set(['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode'])
+const KNOWN_HARNESS_IDS = new Set(['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode', 'hermes'])
 
 test('registry returns only known harness ids, always includes claude', async () => {
   const adapters = await getEnabledAdapters()
@@ -27,7 +28,7 @@ test('each adapter appears in getEnabledAdapters iff its isAvailable() returns t
   const adapters = await getEnabledAdapters()
   const ids = adapters.map(a => a.id)
 
-  for (const adapter of [claudeAdapter, codexAdapter, geminiAdapter, copilotAdapter, antigravityAdapter, kimiAdapter, opencodeAdapter]) {
+  for (const adapter of [claudeAdapter, codexAdapter, geminiAdapter, copilotAdapter, antigravityAdapter, kimiAdapter, opencodeAdapter, hermesAdapter]) {
     if (adapter.isAvailable()) {
       expect(ids).toContain(adapter.id)
     } else {

@@ -1,3 +1,5 @@
+import { needsOwner } from '@agentistics/core'
+
 /**
  * session-context.ts — **pure**: what `agentop hooks context` tells a starting Claude Code session
  * about the assistants already running on this machine.
@@ -24,6 +26,8 @@ export interface ContextSession {
   activity?: string | undefined
   /** Busy workers a finished turn is waiting on: not waiting on a person. */
   waitingOnWorkers?: number | undefined
+  /** The finished turn only reacted to a notice from another session: nothing for a person to answer. */
+  afterNotice?: boolean | undefined
   harness?: string | undefined
   cwd: string
   label?: string | undefined
@@ -53,6 +57,7 @@ const shortId = (id: string): string => id.slice(0, 8)
 const stateWord = (s: ContextSession): string => {
   if (s.activity === 'waiting-approval') return 'needs approval'
   if (s.activity === 'waiting' && s.waitingOnWorkers) return 'waiting on workers'
+  if (s.activity === 'waiting' && s.afterNotice) return 'read a notice'
   if (s.activity) return s.activity
   return s.status
 }
@@ -80,7 +85,7 @@ export function planSessionContext(o: {
     .slice()
     .sort((a, b) => rankOf(a.activity) - rankOf(b.activity) || a.id.localeCompare(b.id))
 
-  const waiting = running.filter(s => s.activity === 'waiting-approval' || (s.activity === 'waiting' && !s.waitingOnWorkers))
+  const waiting = running.filter(s => needsOwner({ state: s.activity ?? '', waitingOnWorkers: s.waitingOnWorkers, afterNotice: s.afterNotice }))
 
   // A task is reopenable HERE when it has no live session left and at least one of its sessions sat
   // in this directory (or under it). Machine-wide it would be noise; scoped, it is the answer to

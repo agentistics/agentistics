@@ -1,5 +1,5 @@
 import { format, parseISO } from 'date-fns'
-import { isLocalModelId, LOCAL_MODEL_PRICE } from './local-models'
+import { isLocalModelId, isUnpricedRouteId, LOCAL_MODEL_PRICE } from './local-models'
 export interface DailyActivity {
   date: string
   messageCount: number
@@ -180,9 +180,11 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // the bash tool's command and lines/files from the edit/write inputs (edit deltas, not git diff); gitLines is true: the
   // canonical replay (engine 1.2.0) states them too.
   opencode: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: true, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
-  // Hermes (Nous Research): DECLARED only. No adapter reads its store yet and no live probe has run, so
-  // nothing is claimed — every metric is false until a recorded run proves otherwise.
-  hermes: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  // Hermes (Nous Research): `adapters/hermes.ts` reads `state.db` — the session row's cumulative token
+  // counters, the model, Hermes' own stated cost (table price when it states none), tool calls and turn
+  // times from `messages` (copied branch history skipped). contextWindow (the store has no window) and
+  // gitLines (only write_file/patch inputs) stay off; no failure flag exists, so no tool error is counted.
+  hermes: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: false, compaction: false, skills: false, mcpServers: false },
   // The NATIVE Agentistics harness (`agentistics`): its sessions are SYNTHESIZED from the journal's
   // projection facts (`server/native-sessions.ts`), not parsed from a transcript, so a metric is `true`
   // only where the facts carry it. Tokens, cost and model are real (every billed response is a
@@ -1155,6 +1157,7 @@ export const UNPRICED_PRICE: Readonly<ModelPrice> = Object.freeze({ input: 0, ou
  * models are not table rows and read `null` here too (`isLocalModelId` says why they cost nothing).
  */
 export function pricingKey(modelId: string): string | null {
+  if (isUnpricedRouteId(modelId)) return null
   if (MODEL_PRICING[modelId]) return modelId
   const id = String(modelId ?? '')
   let forwardKey = ''
@@ -1184,6 +1187,8 @@ export function getModelPrice(modelId: string): ModelPrice {
   // a paid model with the same base name must never match. Source (2026-10-31):
   // https://github.com/anomalyco/opencode/blob/v1.17.9/packages/web/src/content/docs/zen.mdx
   if (modelId === 'opencode/big-pickle' || /^opencode\/[^/]+-free$/.test(modelId)) return LOCAL_MODEL_PRICE
+  // Before every table lookup: the partial and canonical matches below would price its tag-less name.
+  if (isUnpricedRouteId(modelId)) return UNPRICED_PRICE
   if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
   // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
   // the table so no partial-prefix match can price it. See local-models.ts.
@@ -1363,6 +1368,15 @@ export function modelCostUSD(usage: ModelUsage, modelId: string): number | null 
   if (usage.costSource !== undefined) return usage.costUSD
   if (isUnpricedModel(modelId)) return null
   return calcCost(usage, modelId)
+}
+
+/**
+ * Whether a per-model row has a cost to SHOW. A declared cost wins over the table, so a model the table does
+ * not know shows its declared figure; a declared 0 counts only when nothing of that row was left unpriced.
+ */
+export function hasModelCost(usage: ModelUsage, modelId: string): boolean {
+  if (usage.costSource !== undefined) return usage.costUSD > 0 || !usage.unpricedTokens
+  return !isUnpricedModel(modelId)
 }
 
 /** Sum-friendly: an UNPRICED model contributes 0 (tokens are reported separately — see {@link unpricedTokens}). */

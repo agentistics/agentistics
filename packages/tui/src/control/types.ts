@@ -875,6 +875,11 @@ export interface ControlSession {
    */
   waitingOnWorkers?: number
   /**
+   * The finished turn (`state: 'waiting'`) only reacted to a `notice` from another session — nothing to
+   * answer, so `needsOwner` leaves it out of every "needs you" count. Absent on every other row.
+   */
+  afterNotice?: true
+  /**
    * The reasoning effort this session was STARTED with, when one was asked for.
    *
    * Recorded at spawn, like `model` beside it — it is what agentop passed, not something read back

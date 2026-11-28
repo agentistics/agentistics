@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import {
-  MESSAGE_MIN_GAP_MS, messageHeader, messageStatus, resetMessageRateLimit, sendSessionMessage, type MessageDeps,
+  MESSAGE_MIN_GAP_MS, messageHeader, messageStatus, noticeThreadTitle, resetMessageRateLimit, sendSessionMessage, type MessageDeps,
 } from './session-message'
+import { NOTICE_INSTRUCTION_MARK, noticeInstruction } from '@agentistics/core'
 
 const ROWS = [
   { id: 'parent-1', title: 'Leader', conversationId: 'conv-p' },
@@ -82,14 +83,46 @@ describe('kind=notice is information, never a delivery', () => {
     })
     const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'Motor leader is now 514ce7bc43' }, f.deps)
     expect(out).toMatchObject({ ok: true, kind: 'notice', delivered: true, mirrored: true })
-    expect(f.prompts).toEqual([{ id: 'parent-1', text: '[from session child-1 · notice — no reply needed]\nMotor leader is now 514ce7bc43' }])
+    // The fake board returns no thread id here, so the text carries the thread-less instruction.
+    expect(f.prompts).toEqual([{ id: 'parent-1', text: `[from session child-1 · notice — no reply needed]\nMotor leader is now 514ce7bc43\n${noticeInstruction()}` }])
     expect(messageHeader('child-1', 'notice')).toBe('[from session child-1 · notice — no reply needed]')
     expect(f.comments).toHaveLength(1)
     expect(f.comments[0]!.c.kind).toBeUndefined()
     expect(f.comments[0]!.c.message).toEqual({ to: 'parent-1', kind: 'notice' })
+    expect(f.comments[0]!.c.newThread).toEqual({ title: 'Motor leader is now 514ce7bc43', kind: 'notice' })
     expect(moved).toEqual([])
     expect(events).toEqual([])
     expect(stamped).toEqual([])
+  })
+  test('a notice opens a thread on the sender\'s task BEFORE typing, and the typed text names it', async () => {
+    const order: string[] = []
+    const f = fake({
+      senderTask: async () => ({ taskId: 't-e1', subtaskId: 's-1' }),
+      comment: async (_taskId, c) => { order.push('comment'); return c.newThread ? { ok: true, threadId: 'th-abc' } : { ok: true } },
+      prompt: async (id, text) => { order.push('prompt'); f.prompts.push({ id, text }); return { ok: true } },
+    })
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'Leader handed over\nmore detail' }, f.deps)
+    expect(out).toMatchObject({ ok: true, threadId: 'th-abc', mirrored: true })
+    expect(order).toEqual(['comment', 'prompt'])
+    const text = f.prompts[0]!.text
+    expect(text).toContain('threadId=th-abc')
+    expect(text).toContain('ref=t-e1')
+    expect(text).toContain('no reply to the user')
+    expect(text.split('\n').at(-1)).toBe(noticeInstruction({ taskId: 't-e1', threadId: 'th-abc' }))
+    expect(f.comments).toEqual([])  // the custom comment fake does not record; the one call is the thread
+  })
+  test('a notice from an unfiled sender still carries the no-reply instruction, without a thread', async () => {
+    const f = fake()
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'FYI' }, f.deps)
+    expect(out).toMatchObject({ ok: true, mirrored: false })
+    expect(out.ok && 'threadId' in out && out.threadId).toBeFalsy()
+    expect(f.prompts[0]!.text).toContain(NOTICE_INSTRUCTION_MARK)
+    expect(f.prompts[0]!.text).not.toContain('threadId=')
+  })
+  test('the notice thread title is the first line, cut short', () => {
+    expect(noticeThreadTitle('\n  first line  \nsecond')).toBe('first line')
+    expect(noticeThreadTitle('x'.repeat(200))).toHaveLength(80)
+    expect(noticeThreadTitle('   ')).toBe('Notice')
   })
   test('awaiting is refused with a notice', async () => {
     expect(await sendSessionMessage('child-1', { to: 'parent-1', kind: 'notice', body: 'x', awaiting: 'y' }, fake().deps))
@@ -102,6 +135,7 @@ describe('kind=notice is information, never a delivery', () => {
       await sendSessionMessage('child-1', { to: 'parent-1', kind, body: 'x' }, f.deps)
       expect(f.prompts[0]!.text).toBe(`[from session child-1 · ${kind}]\nx`)
       expect(f.comments[0]!.c.kind).toBe(kind === 'question' ? undefined : kind)
+      expect(f.comments[0]!.c.newThread).toBeUndefined()
     }
   })
 })

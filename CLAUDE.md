@@ -843,6 +843,15 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   ├── adapters/antigravity.ts → Antigravity CLI (agy) reader (brain/<conv>/.system_generated/logs/transcript_full.jsonl + the global history.jsonl + READ-ONLY bun:sqlite reads of conversations/<conv>.db `gen_metadata` and the optional conversation_summaries.db)
   ├── adapters/antigravity-parse.ts → pure parser; skips replayed CONVERSATION_HISTORY steps and dedupes by step_index (no double counting), never treats a slash command as the first prompt, counts ERROR_MESSAGE steps, derives files/lines from the edit payloads, and drops a conversation only when it is a proven invoke_subagent child
   ├── adapters/opencode.ts / opencode-parse.ts → read-only WAL SQLite session/message metrics; count message usage once, additive reasoning, per-model prices, last-input context, optional model catalog window
+  ├── adapters/hermes.ts / hermes-parse.ts → read-only `$HERMES_HOME/state.db` (schema 22–31 AND every column
+  │                          read, else refused in words; derived from source, never checked on a real install).
+  │                          Tokens = the session row's counters (never `session_model_usage`); a stated cost
+  │                          (`actual ?? estimated`, status not `unknown`) wins as `costSource: 'harness'`, else the
+  │                          table through core's `hermesModelId` (`provider:model`); copied branch/compression
+  │                          history is skipped; tool calls once per id, turns by `activeMinutesOf`, no tool errors.
+  │                          Only user/assistant/tool rows count. A model is LOCAL (cost 0) only by `billing_provider` — never by its `name:tag`, which paid Ollama
+  │                          Cloud shares; any other local-looking one is unpriced (`ollama-cloud/`, `unpriced/`), and `custom` ALWAYS is, localhost included.
+  │                          With no `-wal` the file is opened `immutable=1`, so no sidecar is written beside it
   └── adapters/antigravity-protobuf.ts → **pure**, dependency-free protobuf wire reader for the gen_metadata blobs (tokens + model id); never throws — malformed input yields null
 
 packages/web/src/ (React + Vite, port 47292 in dev)

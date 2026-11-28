@@ -154,6 +154,8 @@ export interface SessionPatch {
   harnessName?: string
   /** Written alongside `harnessName`, never on its own — see `ManagedSession.harnessNameSince`. */
   harnessNameSince?: number
+  /** See `ManagedSession.lastMessage`. `null` clears it. */
+  lastMessage?: { at: string; from?: string; kind?: string } | null
   /** See `ManagedSession.structuredDriver`. */
   structuredDriver?: string
   /** See `ManagedSession.away`. `null` clears it (a session switched back off). */
@@ -279,6 +281,8 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...(typeof s.harnessNameSince === 'number' && Number.isFinite(s.harnessNameSince)
       ? { harnessNameSince: s.harnessNameSince }
       : {}),
+    // The notice mark (SESSAO.AVISO-NA-THREAD). Missing here, the first heartbeat rewrite would drop it.
+    ...sanitizeLastMessage(s.lastMessage),
     ...(typeof s.structuredDriver === 'string' && s.structuredDriver ? { structuredDriver: s.structuredDriver } : {}),
     // Per-session autonomous mode. Missing here, a flag set at spawn or by the switch was wiped by the
     // first heartbeat rewrite — the session went on being told the owner was out, and the row said not.
@@ -293,6 +297,13 @@ function sanitize(raw: unknown): ManagedSession | null {
     ...sanitizeRepo(s.repo),
     ...sanitizeRetire(s.retire),
   }
+}
+
+/** The notice mark, only with a parseable `at` and string extras: this is a hand-editable file. */
+function sanitizeLastMessage(raw: unknown): { lastMessage?: { at: string; from?: string; kind?: string } } {
+  const m = raw as { at?: unknown; from?: unknown; kind?: unknown } | null | undefined
+  if (!m || typeof m !== 'object' || typeof m.at !== 'string' || !Number.isFinite(Date.parse(m.at))) return {}
+  return { lastMessage: { at: m.at, ...(typeof m.from === 'string' && m.from ? { from: m.from } : {}), ...(typeof m.kind === 'string' && m.kind ? { kind: m.kind } : {}) } }
 }
 
 /**

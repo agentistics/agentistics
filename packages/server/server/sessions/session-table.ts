@@ -225,7 +225,7 @@ export function emptyReason(o: {
  * The rows the closing "N waiting on you" sentence names: a question, or a finished turn with no busy
  * worker (`needsOwner`). A leader waiting on its workers has nothing for the reader to answer.
  */
-export function waitingOnReader<T extends Pick<ControlSession, 'state' | 'waitingOnWorkers'>>(rows: readonly T[]): T[] {
+export function waitingOnReader<T extends Pick<ControlSession, 'state' | 'waitingOnWorkers' | 'afterNotice'>>(rows: readonly T[]): T[] {
   return rows.filter(needsOwner)
 }
 

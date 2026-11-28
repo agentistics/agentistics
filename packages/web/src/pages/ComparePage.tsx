@@ -616,7 +616,7 @@ function CompareByHarness() {
                       // Every billed counter: a rate per million computed over the non-cached 4 %
                       // of the volume reads tens of times higher than what is actually charged.
                       const totalTok = totalTokens(m.tokens)
-                      const unpricedModel = isUnpricedModel(m.model)
+                      const unpricedModel = m.priced === undefined ? isUnpricedModel(m.model) : !m.priced
                       const perM = totalTok > 0 && !unpricedModel ? m.costUSD / (totalTok / 1e6) : null
                       return (
                         <div key={m.model} style={{

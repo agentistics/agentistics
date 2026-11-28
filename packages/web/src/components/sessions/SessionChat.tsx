@@ -48,7 +48,8 @@ import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
-import { ChatBubble, type ChatTurn } from './ChatBubble'
+import { ChatBubble, NoticeReplyFold, type ChatTurn } from './ChatBubble'
+import { noticeReplyIndexes } from '../../lib/systemEvent'
 import { ReasoningRow, useReasoningClock } from './ReasoningRow'
 import { enterSends } from '../../lib/composerEnter'
 import { WorkingNote } from './WorkingNote'
@@ -2345,10 +2346,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const browserBlock = browserAt === null ? null : (
     <SessionBrowserBlock managedId={session.id} lang={lang} model={sessionBrowser} onOpenVault={openVault} title={session.title} />
   )
+  // A reaction to a notice from another session is not an answer to the person: folded (owner, 27/11).
+  const noticeReplies = useMemo(() => noticeReplyIndexes(turns), [turns])
   // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
   const renderTurn = (t: ChatTurn, i: number) => (
             <Fragment key={i}>
             {(placedAttention.before.get(i) ?? []).map((m, k) => <AttentionMarkLine key={`am-${i}-${k}`} mark={m} pt={pt} />)}
+            <NoticeReplyFold fold={noticeReplies.has(i)} pt={pt} panelId={`notice-reply-${session.id}-${i}`}>
             <ChatBubble
               turn={t}
               sessionId={session.id}
@@ -2381,6 +2385,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 ...(canPrompt && t.role === 'assistant' ? { onReplyExcerpt: onReplyToExcerpt } : {})
               }
             />
+            </NoticeReplyFold>
             </Fragment>
   )
 
