@@ -5,7 +5,7 @@ import { spawn } from 'child_process'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
-import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH } from './config'
+import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH, HERMES_DIR, HERMES_DB_PATH } from './config'
 import { featureOn, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
 import { dataDirty, invalidateCache, markDataDirty, noteDataChange, rebuildNow, useWatcherDrivenRefresh } from './data'
@@ -161,7 +161,7 @@ const DEFAULT_IGNORED = /(^|[/\\])(\.git|node_modules|plugins|cache|\.tmp|shell_
  * A `Record<HarnessId, …>` so a harness added later has to say, rather than being absent by omission
  * — kimi WAS absent by omission (P-30): its writes refreshed nothing, so its metrics and its
  * first-sighting link waited for some other harness to trigger a rebuild. claude is watched above
- * through its own two directories; OpenCode watches only its SQLite file and WAL sidecar.
+ * through its own two directories; OpenCode and Hermes watch only their SQLite file and WAL sidecar.
  */
 const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
   claude: null,
@@ -171,14 +171,14 @@ const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
   antigravity: ANTIGRAVITY_BRAIN_DIR,
   kimi: join(KIMI_DIR, 'sessions'),
   opencode: dirname(OPENCODE_DB_PATH),
-  hermes: null,
+  hermes: HERMES_DIR,
 }
 
 /** Mirror a new/changed source file into the archive, then tell the rebuild scheduler. */
 function onSourceChange(path: string | undefined, isWrite: boolean): void {
   // Mirror new/changed source files into the archive before notifying clients,
   // so deleted-by-cleanup history is preserved as it is written.
-  if (typeof path === 'string' && isWrite && path !== OPENCODE_DB_PATH && path !== `${OPENCODE_DB_PATH}-wal`) void mirrorFile(path)
+  if (typeof path === 'string' && isWrite && path !== OPENCODE_DB_PATH && path !== `${OPENCODE_DB_PATH}-wal` && path !== HERMES_DB_PATH && path !== `${HERMES_DB_PATH}-wal`) void mirrorFile(path)
   // Tell whoever links conversations that this harness is writing RIGHT NOW: kimi holds its session
   // files open only while it writes, so this is the moment its process can be caught naming its
   // conversation (`transcript-activity.ts`, `process-transcript.ts`).
@@ -276,6 +276,11 @@ export async function setupFileWatcher(opts: { lateIntervalMs?: number } = {}) {
         // Watch these files only: the same DB can contain OAuth tables and must never be archived.
         watch(OPENCODE_DB_PATH, /-shm$/, false, true)
         watch(`${OPENCODE_DB_PATH}-wal`, /-shm$/, false, true)
+      }
+      else if (w.label === 'hermes') {
+        // These two files only: Hermes' home also holds .env and auth.json.
+        watch(HERMES_DB_PATH, /-shm$/, false, true)
+        watch(`${HERMES_DB_PATH}-wal`, /-shm$/, false, true)
       }
       else if (w.dir === ANTIGRAVITY_CONVERSATIONS_DIR) watch(w.dir, /(-wal|-shm|-journal)$/)
       else if (w.label === 'antigravity') watch(w.dir, ANTIGRAVITY_IGNORED)

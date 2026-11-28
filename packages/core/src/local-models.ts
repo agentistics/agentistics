@@ -20,9 +20,16 @@ const LOCAL_RUNTIME_PREFIXES = [
   'localhost',
 ] as const
 
+/** Routes with NO price: neither free nor a table row. `ollama-cloud/` is the paid hosted service
+ *  (it starts with `ollama`, and is not local); `unpriced/` is a local-looking model whose billing
+ *  provider was not a local one (`hermesModelId`). */
+export function isUnpricedRouteId(modelId: string): boolean {
+  return /^(ollama-cloud|unpriced)\//i.test(String(modelId ?? ''))
+}
+
 export function isLocalModelId(modelId: string): boolean {
   const id = String(modelId ?? '').toLowerCase()
-  return LOCAL_RUNTIME_PREFIXES.some(p => id.startsWith(p))
+  return !isUnpricedRouteId(id) && LOCAL_RUNTIME_PREFIXES.some(p => id.startsWith(p))
 }
 
 /** What a local call costs, per 1M tokens, in every column. */
