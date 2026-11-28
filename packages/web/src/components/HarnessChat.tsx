@@ -1,6 +1,6 @@
 import { SurfaceTurnBadge } from './SurfaceTurnBadge'
 import { AgentisticsLoader } from './AgentisticsLoader'
-import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { CodeCopyBlock } from './chat/CodeCopyPre'
 import remarkGfm from 'remark-gfm'
@@ -10,8 +10,8 @@ import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS, HARNESS_COLORS } from '../lib/harness'
 import { splitInlinedHistory } from '../lib/transcriptSplit'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { surfaceTurnText, parseSystemEvent, isRenameEcho } from '../lib/systemEvent'
-import { FleetSystemEventRow } from './sessions/ChatBubble'
+import { surfaceTurnText, parseSystemEvent, isRenameEcho, noticeReplyIndexes } from '../lib/systemEvent'
+import { FleetSystemEventRow, NoticeReplyFold } from './sessions/ChatBubble'
 
 interface HarnessChatProps {
   harness: HarnessId
@@ -84,6 +84,26 @@ function ToolsBlock({ tools, pt }: { tools: string[]; pt: boolean }) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The transcript's messages as drawn: inlined history split out, and a session's REACTION to a notice from
+ * another session folded under the "Aviso" row exactly as the sessions chat does (owner, 27/11: one session
+ * shell for every harness — this view serves claude, codex, gemini, copilot, kimi, antigravity and opencode).
+ */
+export function TranscriptMessages({ transcript, harness, pt }: { transcript: readonly TranscriptMessage[]; harness: HarnessId; pt: boolean }) {
+  const folded = useMemo(() => transcript.flatMap((msg, i) =>
+    splitInlinedHistory(msg.role, msg.content).map((split, j) => ({ key: `${i}-${j}`, msg: { ...msg, role: split.role, content: split.content } }))), [transcript])
+  const noticeReplies = useMemo(() => noticeReplyIndexes(folded.map(f => ({ role: f.msg.role, text: f.msg.content }))), [folded])
+  return (
+    <>
+      {folded.map(({ msg, key }, k) => (
+        <NoticeReplyFold key={key} fold={noticeReplies.has(k)} pt={pt} panelId={`notice-reply-${key}`}>
+          <MessageBubble msg={msg} harness={harness} pt={pt} />
+        </NoticeReplyFold>
+      ))}
+    </>
   )
 }
 
@@ -565,16 +585,7 @@ export function HarnessChat({ harness, lang, initialProject, initialSessionId, o
             {pt ? 'Nenhuma mensagem' : 'No messages'}
           </div>
         )}
-        {transcript.flatMap((msg, i) =>
-          splitInlinedHistory(msg.role, msg.content).map((split, j) => (
-            <MessageBubble
-              key={i + '-' + j}
-              msg={{ ...msg, role: split.role, content: split.content }}
-              harness={harness}
-              pt={pt}
-            />
-          ))
-        )}
+        <TranscriptMessages transcript={transcript} harness={harness} pt={pt} />
       </div>
     </div>
   )

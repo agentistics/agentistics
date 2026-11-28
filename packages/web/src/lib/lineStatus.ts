@@ -29,6 +29,8 @@ export type LineStatusKind =
   | 'you'
   /** The turn ended and the session waits on busy workers it started: nothing for a person to answer. */
   | 'workers'
+  /** The turn ended after a notice from another session: nothing for a person to answer. */
+  | 'notice'
   /** Alive and quiet (`idle`, `unknown`). */
   | 'idle'
   /** Finished (`exited`, `closed`). */
@@ -46,13 +48,14 @@ export const LINE_STATUS_COLOR: Record<LineStatusKind, string> = {
   you: '#b48cff',
   // Calm on purpose: nothing is asked of the person.
   workers: 'var(--accent-cyan)',
+  notice: 'var(--text-tertiary)',
   idle: 'var(--text-tertiary)',
   ended: 'var(--text-tertiary)',
   fell: 'var(--accent-red)',
 }
 
 /** The kind a row wears. `fell` is the caller's knowledge (the machine said so); everything else is the row's. */
-export function lineStatusKind(state: SessionState, signal: ActivitySignal | null | undefined, fell = false, waitingOnWorkers = 0): LineStatusKind {
+export function lineStatusKind(state: SessionState, signal: ActivitySignal | null | undefined, fell = false, waitingOnWorkers = 0, afterNotice = false): LineStatusKind {
   if (fell || state === 'lost') return 'fell'
   if (state === 'exited' || state === 'closed') return 'ended'
   // A dialog outranks activity evidence, the same precedence `liveAge` applies.
@@ -61,7 +64,7 @@ export function lineStatusKind(state: SessionState, signal: ActivitySignal | nul
   if (signal === 'tool' || signal === 'heavy-hold') return 'cmd'
   if (signal === 'task') return 'task'
   if (signal === 'output' || state === 'working') return 'writing'
-  if (state === 'waiting') return waitingOnWorkers > 0 ? 'workers' : 'you'
+  if (state === 'waiting') return waitingOnWorkers > 0 ? 'workers' : afterNotice ? 'notice' : 'you'
   return 'idle'
 }
 
@@ -73,6 +76,7 @@ const BASE: Record<LineStatusKind, { pt: string; en: string }> = {
   approval: { pt: 'esperando sua resposta (pergunta ou aprovação)', en: 'waiting for your answer (question or approval)' },
   you: { pt: 'esperando você', en: 'waiting for you' },
   workers: { pt: 'esperando workers', en: 'waiting on workers' },
+  notice: { pt: 'leu um aviso', en: 'read a notice' },
   idle: { pt: 'parada', en: 'idle' },
   ended: { pt: 'encerrada', en: 'ended' },
   fell: { pt: 'caiu', en: 'fell' },

@@ -19,7 +19,7 @@ const STATE_WORD: Record<Lang, Partial<Record<FleetRow['state'], string>>> = {
 }
 
 /** Pure: the chip's text and dot colour for a session's state. */
-export function followChipView(row: Pick<FleetRow, 'title' | 'state' | 'waitingOnWorkers'> | undefined, fallbackTitle: string | undefined, lang: Lang): { text: string; dot: string } {
+export function followChipView(row: Pick<FleetRow, 'title' | 'state' | 'waitingOnWorkers' | 'afterNotice'> | undefined, fallbackTitle: string | undefined, lang: Lang): { text: string; dot: string } {
   const title = row?.title || fallbackTitle || (lang === 'pt' ? 'Navegador' : 'Browser')
   const word = row ? (isWaitingOnWorkers(row) ? (lang === 'pt' ? 'esperando workers' : 'waiting on workers') : STATE_WORD[lang][row.state]) : undefined
   const dot = !row ? 'var(--text-tertiary)'
@@ -29,7 +29,7 @@ export function followChipView(row: Pick<FleetRow, 'title' | 'state' | 'waitingO
   return { text: word ? `${title} · ${word}` : title, dot }
 }
 
-export function BrowserFollowChip({ lang, enabled = true, rows }: { lang: Lang; enabled?: boolean; /** Injected in tests: the fleet rows otherwise come from `useFleet`. */ rows?: readonly Pick<FleetRow, 'id' | 'title' | 'state' | 'conversationId' | 'waitingOnWorkers'>[] }) {
+export function BrowserFollowChip({ lang, enabled = true, rows }: { lang: Lang; enabled?: boolean; /** Injected in tests: the fleet rows otherwise come from `useFleet`. */ rows?: readonly Pick<FleetRow, 'id' | 'title' | 'state' | 'conversationId' | 'waitingOnWorkers' | 'afterNotice'>[] }) {
   const state = useBrowserWindows()
   const { pathname } = useLocation()
   const mobile = useIsMobile()

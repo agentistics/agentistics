@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { busyChildCounts, needsOwner, ownerState, type TeamStateRow } from './waitingOnWorkers'
+import { busyChildCounts, isAfterNotice, needsOwner, ownerState, type TeamStateRow } from './waitingOnWorkers'
 
 const row = (id: string, over: Partial<TeamStateRow> = {}): TeamStateRow => ({ id, busy: false, ...over })
 
@@ -79,5 +79,19 @@ describe('needsOwner / ownerState', () => {
     expect(needsOwner({ state: 'waiting-approval', waitingOnWorkers: 2 })).toBe(true)
     expect(ownerState({ state: 'waiting-approval', waitingOnWorkers: 2 })).toBe('waiting-approval')
     expect(needsOwner({ state: 'working' })).toBe(false)
+  })
+})
+
+describe('a turn that only reacted to a notice (owner, 27/11)', () => {
+  it('is not the owner\'s to answer and notifies as idle', () => {
+    expect(isAfterNotice({ state: 'waiting', afterNotice: true })).toBe(true)
+    expect(needsOwner({ state: 'waiting', afterNotice: true })).toBe(false)
+    expect(ownerState({ state: 'waiting', afterNotice: true })).toBe('idle')
+  })
+  it('a dialog still wins, and no mark keeps the old reading', () => {
+    expect(needsOwner({ state: 'waiting-approval', afterNotice: true })).toBe(true)
+    expect(ownerState({ state: 'waiting-approval', afterNotice: true })).toBe('waiting-approval')
+    expect(needsOwner({ state: 'waiting', afterNotice: false })).toBe(true)
+    expect(ownerState({ state: 'waiting' })).toBe('waiting')
   })
 })

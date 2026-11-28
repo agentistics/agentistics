@@ -44,7 +44,7 @@ import { chosenName } from './harness-session-file'
 import { reconcileSessions } from './session-ref'
 import type { AccountRegistryView } from './session-account'
 import {
-  attentionCount, bellTransitions, buildSessionViews, waitingOnItsWorkers, type SessionView,
+  attentionCount, bellTransitions, buildSessionViews, asksNoOne, type SessionView,
 } from './session-view'
 import type { ManagedSession, SessionActivity, SessionBackend } from './types'
 import { calculateProcCpu, type ProcStatSample } from '../hardware-pure'
@@ -1268,7 +1268,7 @@ export function createSessionsPoller(o: {
         sessions
           // A turn waiting on its workers is not remembered as `waiting`, so the bell rings when the
           // last worker stops and the same turn becomes the owner's.
-          .filter((s): s is SessionView & { activity: SessionActivity } => s.activity !== undefined && !waitingOnItsWorkers(s))
+          .filter((s): s is SessionView & { activity: SessionActivity } => s.activity !== undefined && !asksNoOne(s))
           .map(s => [s.id, s.activity]),
       )
 

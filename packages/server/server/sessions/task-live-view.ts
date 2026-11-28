@@ -31,6 +31,8 @@ export interface FleetRowLite {
   activeSignal?: ActivitySignal
   /** Busy workers this finished turn waits on (`ControlSession.waitingOnWorkers`). */
   waitingOnWorkers?: number
+  /** The finished turn only reacted to a notice (`ControlSession.afterNotice`). */
+  afterNotice?: true
   parentSessionId?: string
   lastLines?: string[]
   /** The title of the task the row is filed on. */
@@ -47,7 +49,7 @@ export interface FleetRowLite {
 export function liveRowOf(r: {
   id: string; title: string; harness: string; state: string; model?: string; observedModel?: string; effort?: string; accountId?: string
   parentSessionId?: string; lastLines?: string[]; task?: string; startedAt?: number; activeSignal?: ActivitySignal
-  waitingOnWorkers?: number
+  waitingOnWorkers?: number; afterNotice?: true
 }): FleetRowLite {
   return {
     id: r.id, title: r.title, harness: r.harness, state: r.state,
@@ -61,6 +63,7 @@ export function liveRowOf(r: {
     ...(typeof r.startedAt === 'number' ? { createdMs: r.startedAt } : {}),
     ...(r.activeSignal ? { activeSignal: r.activeSignal } : {}),
     ...(r.waitingOnWorkers ? { waitingOnWorkers: r.waitingOnWorkers } : {}),
+    ...(r.afterNotice ? { afterNotice: true as const } : {}),
   }
 }
 
@@ -117,6 +120,8 @@ export interface LeaderView {
   state: string
   /** The leader's turn ended and it waits on this many busy workers of its own. */
   waitingOnWorkers?: number
+  /** The leader's turn ended after a notice only (`ControlSession.afterNotice`): nothing for the owner to answer. */
+  afterNotice?: true
   /** The leader itself waits in the heavy-job queue (`activityState`): it reads "na fila", as in the sidebar. */
   queued?: boolean
   /** Seconds-old truth about the session itself: when it was created. */
@@ -295,6 +300,7 @@ export function describeLive(o: {
       ...(() => { const a = activityState(r.state, r.activeSignal); return { state: a.state, ...(a.queued ? { queued: true as const } : {}) } })(), createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
       // A leader with work of its own (`activeSignal`) reads as working above; only a leader at its prompt waits on workers.
       ...(r.state === 'waiting' && !r.activeSignal && r.waitingOnWorkers ? { waitingOnWorkers: r.waitingOnWorkers } : {}),
+      ...(r.state === 'waiting' && !r.activeSignal && !r.waitingOnWorkers && r.afterNotice ? { afterNotice: true as const } : {}),
       currentAction: lastLine(r.lastLines, lang, titleOf),
       publishEtaMs: pubs.length ? Math.max(...pubs) : null,
       workers: workers.map(w => {

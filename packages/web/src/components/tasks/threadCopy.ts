@@ -50,7 +50,7 @@ export function threadCopy(lang: Lang) {
     sessionsCount: (n: number) => pt ? `${n} ${n === 1 ? 'sessão' : 'sessões'}` : `${n} ${n === 1 ? 'session' : 'sessions'}`,
     onTask: pt ? 'na tarefa' : 'on the task',
     onTarget: (title: string) => pt ? `em ${title}` : `on ${title}`,
-    threadKind: { topic: '', handback: pt ? 'ENTREGA' : 'HANDBACK', block: pt ? 'BLOQUEIO' : 'BLOCK' } as Record<string, string>,
+    threadKind: { topic: '', handback: pt ? 'ENTREGA' : 'HANDBACK', block: pt ? 'BLOQUEIO' : 'BLOCK', notice: pt ? 'AVISO' : 'NOTICE' } as Record<string, string>,
     commentKind: {
       note: pt ? 'Nota' : 'Note',
       handback: pt ? 'Entrega' : 'Handback',

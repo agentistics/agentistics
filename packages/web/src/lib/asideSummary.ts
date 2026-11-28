@@ -13,7 +13,7 @@ export type SummaryPart = 'active' | 'working' | 'needs'
 
 export interface SummaryCounts { active: number; working: number; needs: number }
 
-type Row = { state: string; waitingOnWorkers?: number }
+type Row = { state: string; waitingOnWorkers?: number; afterNotice?: true }
 
 /** "needs you" is `needsOwner`: a turn waiting on its workers is active, and asks nothing. */
 export function summaryMatches(row: Row, part: SummaryPart): boolean {

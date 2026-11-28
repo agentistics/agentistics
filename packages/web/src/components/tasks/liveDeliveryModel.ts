@@ -83,6 +83,8 @@ export interface LeaderRecord {
   id: string; title: string; harness: string; model: string | null; effort?: string | null; accountId?: string | null; state: string
   /** The leader's turn ended and it waits on this many busy workers of its own. */
   waitingOnWorkers?: number
+  /** The leader's turn ended after a notice only: nothing for the owner to answer. */
+  afterNotice?: true
   /** The leader itself waits in the heavy-job queue: "na fila", as in the sidebar. */
   queued?: boolean
   /** Tasks this leader declared it leads besides its own filing. */

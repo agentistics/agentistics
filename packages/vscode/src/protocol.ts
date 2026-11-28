@@ -55,6 +55,8 @@ export interface FleetRow {
   stateLabel: string
   /** Busy workers a finished turn waits on: not waiting on a person. */
   waitingOnWorkers?: number
+  /** The finished turn only reacted to a notice from another session: not waiting on a person. */
+  afterNotice?: true
   actionable: boolean
   task?: string
   note?: string

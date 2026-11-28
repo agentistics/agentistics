@@ -437,6 +437,8 @@ async function readFleet(): Promise<ContextSession[] | null> {
       id: v.id,
       status: v.status,
       activity: v.activity,
+      ...(v.waitingOnWorkers ? { waitingOnWorkers: v.waitingOnWorkers } : {}),
+      ...(v.afterNotice ? { afterNotice: true } : {}),
       harness: v.harness,
       cwd: v.cwd,
       label: v.label,
