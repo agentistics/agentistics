@@ -11,9 +11,13 @@
  *     codex says only "usage limit exceeded", a hard stop, and a session blocked on no clock is exactly the stuck one);
  *  4. this episode already acted on this account (moved from it, or said there is nobody) → nothing, never twice;
  *  5. candidates = the accounts the switch itself would accept (`options`: same harness, agentic, signed in, not the
- *     current one) that ALSO pass the budget thresholds (5 h < 85 %, week < 95 %), have a FRESH reading, and have a
- *     slot left; minus every account that already limited this conversation in this episode (the loop guard);
- *     and minus every account whose login the harness refused (`expired`: no room, ever, until re-signed in);
+ *     current one) that ALSO pass the budget thresholds (5 h < 85 %, week < 95 %), have a FRESH reading, and are ON
+ *     for agents right now (`agentUse.on`: inside the schedule, or the override on); minus every account that already
+ *     limited this conversation in this episode (the loop guard); and minus every account whose login the harness
+ *     refused (`expired`: no room, ever, until re-signed in). The router's `freeSlots` is NOT a rule for a move
+ *     (CONTA.AUTO-TROCA-REAL): it counts the room for one MORE session, and a move adds none — the session already
+ *     runs, its load only changes account. Judged by slots, every account read `freeSlots: 0` whenever the fleet's
+ *     pace was "over" (the normal state of a busy machine), and 25 of 30 real episodes said "nobody has room";
  *  6. the plan router's own policy (`pickAccount`, the one place it lives) chooses among them.
  *
  * QA round 1 (F1–F9): a move writes `seenAt` = the move's own time, and a limit line that is not NEWER than it is the copy
@@ -23,8 +27,9 @@
  *
  * Unknown capacity is never room: an account with no budget row, a stale row, or no reading is not a candidate.
  *
- * Per-account "cap": the product has no owner-set per-account ceiling today, so the cap is the one the plan router already
- * computes — `freeSlots` (the slots left after the live sessions' MEASURED burn); an account measured to have none is out.
+ * Per-account "cap": for a NEW session (a hand-off successor) it is the one the plan router computes — `freeSlots` (the
+ * slots left after the live sessions' MEASURED burn); an account measured to have none is out. A MOVE (`{ move: true }`)
+ * is judged on the account's own windows and its agent switch only, for the reason in step 5.
  */
 import { pickAccount, type AccountBudget, type HarnessId } from '@agentistics/core'
 import type { SwitchOption } from './account-switch'
@@ -90,9 +95,19 @@ export type AutoDecision =
   | { kind: 'move'; target: SwitchOption; resetsAt?: number; episode: AutoEpisode }
   | { kind: 'none'; resetsAt?: number; episode: AutoEpisode }
 
-/** PURE. May a budget row take work now for `model`? Fresh, registered, startable, under both thresholds, a slot left. */
-export function hasRoom(b: AccountBudget, model?: string): boolean {
+/** The budget row as `planLimitsPayload` serves it: the agent switch's live verdict rides along (schedule / override). */
+type BudgetRow = AccountBudget & { agentUse?: { on: boolean } }
+
+/** How a row is judged: a NEW session needs a free slot; a `move` carries a running session and adds none. */
+export interface RoomOpts { move?: boolean }
+
+/**
+ * PURE. May a budget row take work now for `model`? Fresh, registered, startable, on for agents (schedule or override),
+ * not yielding to a fresher reading, under both thresholds — and, for a NEW session only, a slot left.
+ */
+export function hasRoom(b: BudgetRow, model?: string, opts: RoomOpts = {}): boolean {
   if (b.stale || b.spawnable === false || b.plan === 'unregistered' || b.status === 'hold') return false
+  if (b.agentUse?.on === false || b.yieldsTo !== undefined) return false
   if (!Number.isFinite(b.fiveHourPct) || !Number.isFinite(b.weekPct)) return false
   if (b.fiveHourPct >= FIVE_HOUR_MAX_PCT) return false
   let weekPct = b.weekPct
@@ -109,7 +124,7 @@ export function hasRoom(b: AccountBudget, model?: string): boolean {
     measured = typeof sb.freeSlots === 'number' ? b.freeSlotsMeasured : undefined
   }
   if (weekPct >= WEEK_MAX_PCT) return false
-  if (measured === true && typeof freeSlots === 'number' && freeSlots < 1) return false
+  if (!opts.move && measured === true && typeof freeSlots === 'number' && freeSlots < 1) return false
   return true
 }
 
@@ -118,8 +133,8 @@ const rowOf = (budgets: readonly AccountBudget[], harness: HarnessId, id: string
   budgets.find(b => b.harness === harness && b.account === id)
 
 /** PURE. The account the router would put a new worker on, among `ids` that have room — or none. */
-export function bestAccount(harness: HarnessId, ids: readonly string[], budgets: readonly AccountBudget[], model?: string): string | undefined {
-  const rows = ids.map(id => rowOf(budgets, harness, id)).filter((r): r is AccountBudget => !!r && hasRoom(r, model))
+export function bestAccount(harness: HarnessId, ids: readonly string[], budgets: readonly AccountBudget[], model?: string, opts: RoomOpts = {}): string | undefined {
+  const rows = ids.map(id => rowOf(budgets, harness, id)).filter((r): r is AccountBudget => !!r && hasRoom(r, model, opts))
   return pickAccount(rows)?.account
 }
 
@@ -143,7 +158,7 @@ export function decideAutoSwitch(i: AutoInput): AutoDecision {
   }
   const tried = new Set([...(ep?.tried ?? []), current])
   const candidates = i.options.filter(o => o.harness === i.harness && !tried.has(o.id) && !i.takenThisTick?.has(o.id) && !i.expired?.has(o.id))
-  const pick = bestAccount(i.harness, candidates.map(o => o.id), i.budgets, i.model)
+  const pick = bestAccount(i.harness, candidates.map(o => o.id), i.budgets, i.model, { move: true })
   const target = candidates.find(o => o.id === pick)
   const when = resetsAt !== undefined ? { resetsAt } : {}
   if (target) {

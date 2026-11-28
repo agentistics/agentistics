@@ -42,13 +42,22 @@ describe('decideAutoSwitch', () => {
     if (d.kind !== 'none') throw new Error('x')
     expect(decideAutoSwitch(base({ options: [], episode: d.episode }))).toEqual({ kind: 'skip', why: 'already_handled' })
   })
-  test('cap exceeded (measured: no slot left), over a threshold, stale, held or unregistered are not candidates; unknown capacity is not room', () => {
-    for (const bad of [{ freeSlots: 0, freeSlotsMeasured: true }, { fiveHourPct: 85 }, { weekPct: 95 }, { stale: true }, { status: 'hold' }, { plan: 'unregistered' }, { spawnable: false }]) {
+  test('over a threshold, stale, held, unregistered, off for agents or yielding are not candidates; unknown capacity is not room', () => {
+    for (const bad of [{ fiveHourPct: 85 }, { weekPct: 95 }, { stale: true }, { status: 'hold' }, { plan: 'unregistered' }, { spawnable: false }, { agentUse: { on: false } }, { yieldsTo: 'y' }]) {
       expect(hasRoom(row('x', bad as never))).toBe(false)
+      expect(hasRoom(row('x', bad as never), undefined, { move: true })).toBe(false)
     }
-    expect(hasRoom(row('x', { freeSlots: 0, freeSlotsMeasured: false } as never))).toBe(true) // an unmeasured burn is not a cap
-    expect(decideAutoSwitch(base({ budgets: [row('a', { fiveHourPct: 100 }), row('b', { freeSlots: 0, freeSlotsMeasured: true } as never), row('c', { stale: true })] })).kind).toBe('none')
+    expect(hasRoom(row('x', { fiveHourPct: 84.9, weekPct: 94.9 }), undefined, { move: true })).toBe(true) // just under both thresholds
+    expect(decideAutoSwitch(base({ budgets: [row('a', { fiveHourPct: 100 }), row('b', { agentUse: { on: false } } as never), row('c', { stale: true })] })).kind).toBe('none')
     expect(decideAutoSwitch(base({ budgets: [row('a', { fiveHourPct: 100 })] })).kind).toBe('none') // no row at all = unknown = not room
+  })
+  test('a free slot is the rule for a NEW session, never for a move: a move adds no session to the fleet', () => {
+    const full = row('x', { freeSlots: 0, freeSlotsMeasured: true } as never)
+    expect(hasRoom(full)).toBe(false) // a new worker (hand-off successor) still needs a slot
+    expect(hasRoom(full, undefined, { move: true })).toBe(true)
+    expect(hasRoom(row('x', { freeSlots: 0, freeSlotsMeasured: false } as never))).toBe(true) // an unmeasured burn is not a cap
+    expect(decideAutoSwitch(base({ budgets: [row('a', { fiveHourPct: 100 }), row('b', { freeSlots: 0, freeSlotsMeasured: true } as never), row('c', { stale: true })] })))
+      .toMatchObject({ kind: 'move', target: { id: 'b' } })
   })
   test('not agentic / signed out: the switch itself never offers them, so they are never a target', () => {
     // `options` is what `listSwitchTargets(..., agentCaller: true)` returns; an account it leaves out is not here.
@@ -161,5 +170,30 @@ describe('QA fixes in the policy', () => {
     expect(hasRoom(scoped(10))).toBe(false) // no model → no number for it → not room
     expect(hasRoom(scoped(10), 'claude-opus-5')).toBe(true)
     expect(decideAutoSwitch(base({ model: 'claude-opus-5', budgets: [row('a', { fiveHourPct: 100 }), scoped(99), row('c', { fiveHourPct: 50 })] }))).toMatchObject({ kind: 'move', target: { id: 'c' } })
+  })
+})
+
+/** The plan-limits rows this machine served on 2026-11-27 (CONTA.AUTO-TROCA-REAL), trimmed to what the policy reads. */
+const real = (o: Partial<Record<'nayara' | 'principal' | 'vini', Partial<AccountBudget> & { agentUse?: unknown }>> = {}): AccountBudget[] => [
+  row('principal', { plan: 'Claude Max 5x', fiveHourPct: 100, weekPct: 17, status: 'hold', freeSlots: 0, freeSlotsMeasured: true, agentUse: { reason: 'override-on', on: true, enabled: true, override: true }, ...o.principal } as never),
+  row('nayara', { plan: 'Claude Pro', fiveHourPct: 70, weekPct: 60, weekResetsAt: NOW + 1.06 * 86_400_000, daysToWeekReset: 1.06, paceStatus: 'over', freeSlots: 0, freeSlotsMeasured: true, agentUse: { reason: 'in-window', on: true, enabled: true, override: false }, ...o.nayara } as never),
+  row('vini', { plan: 'Claude Max 5x', fiveHourPct: 99, weekPct: 32, status: 'hold', freeSlots: 0, freeSlotsMeasured: false, agentUse: { reason: 'override-on', on: true, enabled: true, override: true }, ...o.vini } as never),
+]
+const realInput = (budgets: AccountBudget[]) => base({ currentAccount: 'principal', options: [opt('nayara'), opt('vini')], budgets })
+
+describe('CONTA.AUTO-TROCA-REAL — the real machine\'s shape', () => {
+  test('Principal limited, Nayara inside its schedule, Vini override on but on hold: moves to Nayara (every row read freeSlots 0)', () => {
+    expect(decideAutoSwitch(realInput(real()))).toMatchObject({ kind: 'move', target: { id: 'nayara' }, episode: { account: 'nayara', tried: ['principal'] } })
+  })
+  test('schedule closed and no override: never a target, even with room', () => {
+    const closed = { agentUse: { reason: 'agenda-off', on: false, enabled: true, override: false } }
+    expect(decideAutoSwitch(realInput(real({ nayara: closed }))).kind).toBe('none')
+  })
+  test('override on: a candidate outside its schedule', () => {
+    const overridden = { fiveHourPct: 20, status: 'ok' as const, agentUse: { reason: 'override-on', on: true, enabled: true, override: true } }
+    expect(decideAutoSwitch(realInput(real({ nayara: { agentUse: { reason: 'agenda-off', on: false, enabled: true, override: false } }, vini: overridden })))).toMatchObject({ kind: 'move', target: { id: 'vini' } })
+  })
+  test('Nayara with her 5-hour window spent: nobody has room, said once', () => {
+    expect(decideAutoSwitch(realInput(real({ nayara: { fiveHourPct: 85 } }))).kind).toBe('none')
   })
 })
