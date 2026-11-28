@@ -23,7 +23,7 @@ import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 
 /** True for a session that wants a person: a turn that ended (and waits on no workers), or a dialog
  *  that is open. */
-export function needsAttention(s: Pick<ControlSession, 'state' | 'waitingOnWorkers'>): boolean {
+export function needsAttention(s: Pick<ControlSession, 'state' | 'waitingOnWorkers' | 'afterNotice'>): boolean {
   return needsOwner(s)
 }
 
@@ -35,7 +35,7 @@ export function needsAttention(s: Pick<ControlSession, 'state' | 'waitingOnWorke
  * this turn", never "never tell me about this session".
  */
 export function attentionCount(
-  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers'>[],
+  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers' | 'afterNotice'>[],
   dismissed?: ReadonlySet<string>,
 ): number {
   let n = 0
@@ -45,7 +45,7 @@ export function attentionCount(
 
 /** The ids of `rows` that count right now — what a dismiss writes down. */
 export function attentionIds(
-  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers'>[],
+  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers' | 'afterNotice'>[],
   dismissed?: ReadonlySet<string>,
 ): string[] {
   return rows.filter(r => needsAttention(r) && !(dismissed?.has(r.id))).map(r => r.id)
@@ -57,7 +57,7 @@ export function attentionIds(
  */
 export function pruneDismissed(
   dismissed: ReadonlySet<string>,
-  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers'>[],
+  rows: readonly Pick<ControlSession, 'id' | 'state' | 'waitingOnWorkers' | 'afterNotice'>[],
 ): ReadonlySet<string> {
   if (dismissed.size === 0) return dismissed
   const waiting = new Set(rows.filter(needsAttention).map(r => r.id))

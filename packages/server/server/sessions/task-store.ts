@@ -33,7 +33,7 @@ import type {
   Attempt, AttemptStatus, HistoricalSession, Subtask, Task, TaskBook, TaskClaim, TaskComment,
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
-import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
+import { isCommentKind, isThreadKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
 import { GuardRefused, boardRaises, boardPieces, memberStatuses, subRank, type BoardSlice, type GuardContext } from '../delivery/guard'
 import { guardedWrite, guardPathsOf, ruleAState, type GuardWiring } from '../delivery/guard-host'
 import { GuardBusy } from '../delivery/guard-locks'
@@ -418,8 +418,6 @@ function sanitizeDelivery(raw: unknown): ThreadDelivery | null {
   }
 }
 
-const THREAD_KINDS = new Set(['topic', 'handback', 'block'])
-
 function sanitizeThread(raw: unknown): TaskThread | null {
   if (!raw || typeof raw !== 'object') return null
   const t = raw as Record<string, unknown>
@@ -443,7 +441,7 @@ function sanitizeThread(raw: unknown): TaskThread | null {
   const muted = Array.isArray(t.mutedSessions) ? t.mutedSessions.filter((x): x is string => typeof x === 'string' && x.length > 0) : []
   return {
     id, taskId, title,
-    kind: typeof t.kind === 'string' && THREAD_KINDS.has(t.kind) ? t.kind as TaskThread['kind'] : 'topic',
+    kind: isThreadKind(t.kind) ? t.kind : 'topic',
     openedBy: str(t.openedBy) ?? 'unknown',
     createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
     participants,

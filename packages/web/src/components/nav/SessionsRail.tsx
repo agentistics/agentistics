@@ -53,7 +53,7 @@ import { SegmentedTabs } from './SegmentedTabs'
 import { isLiveState, isWaitingOnWorkers, needsOwner } from '@agentistics/core'
 
 /** The dot a state earns on a mark: orange for needs-you, green for working, nothing otherwise. */
-function stateDot(row: { state: string; waitingOnWorkers?: number }): string | null {
+function stateDot(row: { state: string; waitingOnWorkers?: number; afterNotice?: true }): string | null {
   if (needsOwner(row)) return 'var(--anthropic-orange)'
   if (isWaitingOnWorkers(row)) return 'var(--accent-cyan)'
   if (isLiveState(row.state)) return '#22c55e'

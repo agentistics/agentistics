@@ -562,6 +562,12 @@ export interface ManagedSession {
    *  older than 2.1.232, which writes the name with no timestamp. */
   harnessNameSince?: number
   /**
+   * SESSAO.AVISO-NA-THREAD — the newest message typed INTO this session by someone else (`last-message.ts`),
+   * persisted here so "its last turn only reacted to a notice" survives a server restart. `kind` is the
+   * message kind (`notice`, `handback`, …); absent = a person's own prompt.
+   */
+  lastMessage?: { at: string; from?: string; kind?: string }
+  /**
    * F2.0 — the structured driver this session ran under (`acp`, `claude-stream-json`, …), stamped when
    * it was hosted over its harness's protocol. A web reopen of such a row runs structured again; a row
    * without it (terminal-born) reopens as a TUI.

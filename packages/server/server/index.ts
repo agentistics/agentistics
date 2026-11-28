@@ -2695,7 +2695,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           session ? { kind: 'session', id: session, via: 'token' } : body.owner === true ? 'keep' : undefined)
         if (!commentAuthor.ok) return json(commentAuthor.reply.body, commentAuthor.reply.status)
         const nt = body.newThread as { title?: unknown; kind?: unknown } | undefined
-        const { isCommentKind } = await import('@agentistics/core')
+        const { isCommentKind, isThreadKind } = await import('@agentistics/core')
         const res = await mod.addComment(ref, {
           author: commentAuthor.value,
           body: String(body.body ?? ''),
@@ -2703,7 +2703,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           ...(Array.isArray(body.attachments) ? { attachments: body.attachments } : {}),
           ...(typeof body.threadId === 'string' && body.threadId ? { threadId: body.threadId } : {}),
           ...(nt && typeof nt.title === 'string'
-            ? { newThread: { title: nt.title, ...(nt.kind === 'topic' || nt.kind === 'handback' || nt.kind === 'block' ? { kind: nt.kind } : {}) } }
+            ? { newThread: { title: nt.title, ...(isThreadKind(nt.kind) ? { kind: nt.kind } : {}) } }
             : {}),
           ...(session ? { session } : body.owner === true ? { owner: true } : {}),
           ...(isCommentKind(body.kind) ? { kind: body.kind } : {}),
@@ -2721,7 +2721,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const action = String(body.action ?? '')
         const threadId = typeof body.threadId === 'string' ? body.threadId : ''
         if (action === 'open') {
-          const kind = body.kind === 'handback' || body.kind === 'block' || body.kind === 'topic' ? body.kind : undefined
+          const { isThreadKind } = await import('@agentistics/core')
+          const kind = isThreadKind(body.kind) ? body.kind : undefined
           // r3 W3a: a proven session that opens a thread is recorded as ITSELF. W3b: the owner's web UI sends `owner: true`
           // (like an owner comment) — in REQUIRED mode that asks the owner's proof (the web repeats with the grant) and the
           // opener keeps the owner's name; legacy is untouched (no gate, the typed name).
@@ -4736,6 +4737,24 @@ async function handleCompressed(req: Request, server: Server<WSData>): Promise<R
 }
 
 await bootstrapServer()
+
+// SESSAO.AVISO-NA-THREAD: the "last message was only a notice" mark survives a restart. `last-message.ts` does no IO
+// (the delivery guard pins every writer), so the server binds it to each session's registry row before the first
+// request can note one. A message to an id with no registry row stays in memory, as it always did.
+{
+  const { bindLastMessagesStore } = await import('./sessions/last-message')
+  const { patchSession, readRegistry } = await import('./sessions/registry')
+  type Mark = { at: string; from?: string; kind?: string }
+  const stored = new Map<string, Mark>()
+  for (const s of await readRegistry().catch(() => [])) if (s.lastMessage) stored.set(s.id, s.lastMessage)
+  bindLastMessagesStore({
+    read: () => stored.entries(),
+    save: async (id, m) => {
+      if (m) stored.set(id, m); else stored.delete(id)
+      await patchSession(id, { lastMessage: m })
+    },
+  })
+}
 
 try {
 // Build the DNS-rebinding allowlist before the first request can arrive, and keep it fresh (an

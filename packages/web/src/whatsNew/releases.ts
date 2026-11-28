@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando uma sessão recebe um aviso de outra, ela não fica mais marcada como "precisa de você" e não toca a notificação: um aviso não é uma pergunta.',
+        en: 'When a session receives a notice from another one, it no longer shows as "needs you" and does not ring: a notice is not a question.',
+      },
+      {
+        pt: 'A reação de uma sessão a um aviso vai para a conversa do aviso na tarefa, e no chat aparece recolhida embaixo do "Aviso", em vez de parecer uma resposta para você.',
+        en: 'A session\'s reaction to a notice goes to the notice\'s thread on the task, and in the chat it shows folded under the "Notice" row instead of looking like a reply to you.',
+      },
+    ],
+  },
   '2.231.0': {
     features: [
       {

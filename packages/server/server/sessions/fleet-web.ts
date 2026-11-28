@@ -720,6 +720,9 @@ export async function readClosedFleet(lang: CliLang, offset: number, limit: numb
   return { total: page.total, sessions, verbCatalog, rows: undefined } as unknown as ReturnType<typeof closedPage>
 }
 
+/** The sender of a typed prompt, when it is another session (`session-message.ts`). Empty for a person's composer. */
+export interface PromptOrigin { from?: string; kind?: string }
+
 /**
  * Perform one verb on one row — through the host, so every refusal the cockpit makes is made here.
  *
@@ -731,9 +734,14 @@ export async function readClosedFleet(lang: CliLang, offset: number, limit: numb
 export async function runFleetAction(
   lang: CliLang,
   req: FleetActionRequest,
+  /**
+   * Who typed the prompt and as what, for the last-message record. A SERVER-side argument on purpose: it is never read
+   * from the request body, so a browser cannot call its own message a notice.
+   */
+  sent: PromptOrigin = {},
 ): Promise<FleetActionResponse> {
   try {
-    const out = await runFleetActionOnce(lang, req)
+    const out = await runFleetActionOnce(lang, req, sent)
     if (!out || typeof out.ok !== 'boolean') throw new Error('Session action returned no result')
     // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
     if (out.ok) kickFleet(req.id)
@@ -746,6 +754,7 @@ export async function runFleetAction(
 async function runFleetActionOnce(
   lang: CliLang,
   req: FleetActionRequest,
+  origin: PromptOrigin,
 ): Promise<FleetActionResponse> {
   const s = controlStrings(lang)
   const host = await hostFor(lang)
@@ -825,7 +834,9 @@ async function runFleetActionOnce(
         } catch { console.warn('[owner-request] confirmed message could not be recorded; check the official request flows') }
         if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
         // FLUXO.AVISOS: the newest message typed INTO this session (host op `ultima-mensagem-sessao`).
-        try { (await import('./last-message')).noteMessageTo(req.id, sentAtMs) } catch { /* a view, never the record */ }
+        // It CARRIES the sender and kind: this entry is newer than the one `session-message` noted, so a bare
+        // one here would erase `notice` and the receiver would read "needs you" again.
+        try { (await import('./last-message')).noteMessageTo(req.id, sentAtMs, origin) } catch { /* a view, never the record */ }
         await recordComposerMessage(req.id, text)
         if (taskNote) await recordComposerMessage(req.id, deliveredText)
         void (async () => {

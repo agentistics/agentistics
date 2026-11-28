@@ -26,6 +26,7 @@ export interface RailRowLike {
   id: string
   state: string
   waitingOnWorkers?: number
+  afterNotice?: true
 }
 
 export interface RailFolderCounts {

@@ -34,10 +34,18 @@
 
 import { isLiveState } from './liveState'
 
-export type ThreadKind = 'topic' | 'handback' | 'block'
+/** `notice`: opened by `agentistics_session_message` kind=notice — the receiver's reaction, if any, goes here (owner, 27/11). */
+export type ThreadKind = 'topic' | 'handback' | 'block' | 'notice'
+
+/** Every thread kind — the ONE list the store and the HTTP routes validate against (a second copy dropped `notice`). */
+export const THREAD_KINDS: readonly ThreadKind[] = ['topic', 'handback', 'block', 'notice']
+
+export function isThreadKind(v: unknown): v is ThreadKind {
+  return typeof v === 'string' && (THREAD_KINDS as readonly string[]).includes(v)
+}
 
 /** The kinds a SESSION may open a thread with. A person may open any. */
-export const SESSION_THREAD_KINDS: readonly ThreadKind[] = ['handback', 'block']
+export const SESSION_THREAD_KINDS: readonly ThreadKind[] = ['handback', 'block', 'notice']
 
 export function canSessionOpenThread(kind: ThreadKind): boolean {
   return SESSION_THREAD_KINDS.includes(kind)

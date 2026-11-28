@@ -11,6 +11,7 @@
 import { resolveSessionAccount, type AccountRegistryView } from './session-account'
 import { activeEvidence, activityApplies, busyChildCounts, isWaitingOnWorkers, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
+import { lastMessageTo } from './last-message'
 import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
 import { type HarnessProcess, sessionAtCwd } from '../live-sessions'
@@ -75,6 +76,11 @@ export interface SessionView {
    * (`withWaitingOnWorkers`). A finished turn carrying it is not the owner's to answer.
    */
   waitingOnWorkers?: number
+  /**
+   * The finished turn reacted to a `notice` typed in by another session (`withAfterNotice`): nothing for
+   * the owner to answer. Absent on every other row.
+   */
+  afterNotice?: true
   /**
    * The last few meaningful lines of this session's screen — what it is saying right now.
    *
@@ -313,6 +319,8 @@ function rankOf(v: SessionView): number {
   if (v.status === 'external') return 5
   // Waiting on its own workers is not waiting on someone: it sorts with the working ones.
   if (v.activity === 'waiting' && v.waitingOnWorkers) return RANK.working!
+  // A turn that only reacted to a notice asks nothing: it sorts below the rows that wait on someone.
+  if (v.activity === 'waiting' && v.afterNotice) return RANK.working!
   return RANK[v.activity ?? ''] ?? 4
 }
 
@@ -345,6 +353,19 @@ export function withWaitingOnWorkers(views: readonly SessionView[]): SessionView
       ? { ...v, waitingOnWorkers: n }
       : v
   })
+}
+
+/**
+ * Mark each live session whose finished turn (`waiting`) was set off by a `notice` — the newest message
+ * typed into it came from another session with kind=notice (`last-message.ts`). A notice asks nothing, so
+ * the turn it caused is not the owner's to answer; any later message (the composer included) replaces the
+ * record and lifts the mark. A dialog (`waiting-approval`) is never marked.
+ */
+export function withAfterNotice(views: readonly SessionView[], lastKindOf: (id: string) => string | undefined): SessionView[] {
+  return views.map(v =>
+    v.activity === 'waiting' && (v.status === 'running' || v.status === 'unregistered') && lastKindOf(v.id) === 'notice'
+      ? { ...v, afterNotice: true as const }
+      : v)
 }
 
 /**
@@ -1137,7 +1158,7 @@ export function buildSessionViews(o: {
   // Retired predecessors are dropped LAST, so everything above — the external-twin dedup and the
   // closed-history cover set — still reasons over the full managed list. Only the final rows the
   // reader sees lose the superseded duplicates; the registry itself is untouched.
-  return [...withWaitingOnWorkers(collapseSupersededSessions(managed)), ...external, ...closed].sort((a, b) => {
+  return [...withAfterNotice(withWaitingOnWorkers(collapseSupersededSessions(managed)), id => lastMessageTo(id)?.kind), ...external, ...closed].sort((a, b) => {
     const byRank = rankOf(a) - rankOf(b)
     if (byRank !== 0) return byRank
     return (b.createdMs ?? 0) - (a.createdMs ?? 0)
@@ -1146,12 +1167,20 @@ export function buildSessionViews(o: {
 
 export function attentionCount(views: readonly SessionView[]): number {
   // An external row's activity is shown, never counted: nobody asked agentop to watch it, so it is no one's alert.
-  return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v) && !waitingOnItsWorkers(v)).length
+  return views.filter(v => v.status !== 'external' && needsAttention(v.activity) && !declaredIdle(v) && !asksNoOne(v)).length
 }
 
 /** A finished turn that waits on its workers (`withWaitingOnWorkers`): no one's alert. */
 export function waitingOnItsWorkers(v: Pick<SessionView, 'activity' | 'waitingOnWorkers'>): boolean {
   return isWaitingOnWorkers({ state: v.activity ?? '', waitingOnWorkers: v.waitingOnWorkers })
+}
+
+/**
+ * A finished turn that is nobody's to answer: it waits on its workers, or it only reacted to a notice
+ * from another session (`withAfterNotice`). Every bell and "waiting" count skips it.
+ */
+export function asksNoOne(v: Pick<SessionView, 'activity' | 'waitingOnWorkers' | 'afterNotice'>): boolean {
+  return waitingOnItsWorkers(v) || (v.activity === 'waiting' && v.afterNotice === true)
 }
 
 /**
@@ -1177,7 +1206,7 @@ export function bellTransitions(
 ): string[] {
   const out: string[] = []
   for (const v of next) {
-    if (v.status === 'external' || !needsAttention(v.activity) || declaredIdle(v) || waitingOnItsWorkers(v)) continue
+    if (v.status === 'external' || !needsAttention(v.activity) || declaredIdle(v) || asksNoOne(v)) continue
     const before = prev.get(v.id)
     if (before === v.activity) continue
     out.push(v.id)

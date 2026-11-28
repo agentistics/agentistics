@@ -63,10 +63,12 @@ export function toCandidate(v: {
   activity?: EventCandidate['activity']
   lastLines?: string[]
   waitingOnWorkers?: number
+  afterNotice?: true
 }): EventCandidate {
   // A finished turn waiting on its workers is the team still working: no "waiting" event (push,
   // desktop, peer) until the last worker stops — and THEN the change is a transition that is reported.
-  const activity = v.activity === 'waiting' && v.waitingOnWorkers ? 'working' as const : v.activity
+  // A turn that only reacted to a notice asks nobody anything either (owner, 27/11).
+  const activity = v.activity === 'waiting' && (v.waitingOnWorkers || v.afterNotice) ? 'working' as const : v.activity
   return {
     id: v.id,
     ...(v.harness ? { harness: v.harness } : {}),
