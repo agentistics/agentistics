@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.231.0': {
+    features: [
+      {
+        pt: 'Base do backup cifrado das conversas: a cifragem em partes e as palavras de recuperação já estão no app, preparando o backup na nuvem que vem a seguir. Nada muda no uso por enquanto.',
+        en: 'Groundwork for encrypted conversation backups: chunked encryption and recovery words are now in the app, getting ready for the cloud backup that comes next. Nothing changes in day-to-day use yet.',
+      },
+    ],
+    fixes: [],
+  },
   '2.230.9': {
     features: [],
     fixes: [
