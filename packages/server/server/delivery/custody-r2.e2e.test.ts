@@ -4,7 +4,8 @@
  * negative control runs after the positive helper has established custody AND its message in the same fixture.
  * No server, no port, no network; git is not involved.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,7 +36,9 @@ const PROJECT = new Map<string, string>([['p1', 'acme/app'], ['p2', 'acme/app'],
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'custody-r2-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 interface Row { id: string; role: string; taskId: string; alive: boolean; cwd: string; harness: string; worktree: boolean }
 const row = (id: string, taskId: string, alive = true, role = 'leader'): Row => ({ id, role, taskId, alive, cwd: '/nowhere', harness: 'claude', worktree: false })
@@ -204,7 +207,7 @@ describe('F2 — rule C is fail-closed by itself (A off and A on)', () => {
       // control: the moment the lock is free, the same tick writes.
       await tickAt(w, T0 + N + 31 * MIN)
       expect(w.read('p3').custody).toMatchObject({ sessionId: 'L2' })
-    }, 30_000)
+    })
   }
   test('rule C off keeps the OLD locking: nothing custody-shaped is taken or written', async () => {
     const w = await world({ c: 'off' })
@@ -214,7 +217,7 @@ describe('F2 — rule C is fail-closed by itself (A off and A on)', () => {
     const held = await lockFile(w.path)
     try { await tickAt(w, T0 + N + 30 * MIN) } finally { await held.release() }
     expect(cs()).toBe(bytes)
-  }, 30_000)
+  })
 })
 
 describe('F3 — only semantic, authorized changes are activity', () => {

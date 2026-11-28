@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
+import { REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,6 +18,8 @@ const DECLARED = (...prs: number[]) => async () => ({ branches: [], shas: [], he
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'delivery-')) })
+// A real delivery store per test: Bun's 5 s default is passed under load, and the dir is then removed under the running body.
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 interface World {

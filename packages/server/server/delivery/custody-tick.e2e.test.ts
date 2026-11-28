@@ -3,7 +3,8 @@
  * service `tick()` and the real service doors that stamp piece activity. Every negative control runs after a positive has
  * established custody in the same fixture; the state is RELOADED from disk (a fresh store + service) after each tick.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,7 +25,9 @@ const PROJECT = new Map<string, string>([['p1', 'acme/app'], ['p2', 'acme/app'],
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'custody-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 interface Row { id: string; role: string; taskId: string; alive: boolean; cwd: string; harness: string; worktree: boolean }
 const row = (id: string, taskId: string, alive = true): Row => ({ id, role: 'leader', taskId, alive, cwd: '/nowhere', harness: 'claude', worktree: false })

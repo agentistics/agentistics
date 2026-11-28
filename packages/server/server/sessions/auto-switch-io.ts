@@ -10,7 +10,7 @@
  */
 import { readFile, mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AccountBudget, HarnessId } from '@agentistics/core'
+import { switchFailureKind, switchFailureSentence, type AccountBudget, type HarnessId, type SwitchOutcome } from '@agentistics/core'
 import { switchSupported, type SwitchOption } from './account-switch'
 import { clock, decideAutoSwitch, autoSwitchWords, resumeDue, type AutoEpisode } from './auto-switch'
 import type { ManagedSession } from './types'
@@ -50,7 +50,7 @@ export interface AutoSwitchDeps {
   options: (row: ManagedSession, accountId: string | undefined) => Promise<readonly SwitchOption[]>
   /** Accounts whose login the harness refused (registry `loginExpiredAt`): never a target. */
   expired?: () => Promise<ReadonlySet<string>>
-  switchAccount: (req: { id: string; accountId: string; resendPending: true }) => Promise<{ ok: boolean; message?: string; id?: string; /** held back by a hold: tried again once it ends, the target is NOT counted as tried */ deferred?: boolean }>
+  switchAccount: (req: { id: string; accountId: string; resendPending: true }) => Promise<{ ok: boolean; message?: string; id?: string; /** the switch's own refusal code, when it refused */ code?: string; /** the session was ended and could not be given back */ ended?: boolean;/** held back by a hold: tried again once it ends, the target is NOT counted as tried */ deferred?: boolean }>
   /** Type a message into a live session (the single resume after a "nobody has room" stop). */
   sendPrompt?: (id: string, text: string) => Promise<boolean>
   label: (harness: HarnessId, accountId: string | undefined) => Promise<string | undefined>
@@ -61,7 +61,10 @@ export interface AutoSwitchDeps {
 
 export interface AutoSwitchResult { moved: Array<{ from: string; to: string; id?: string }>; none: string[]; failed: string[]; resumed: string[]; /** held back by a hold, to be tried again */ deferred: string[] }
 
-const shortId = (row: ManagedSession) => row.label?.trim() || row.harnessName?.trim() || row.id
+/** What the person (or the harness) called the session; empty when nobody did — an id is never shown. */
+const sessionName = (row: ManagedSession) => row.label?.trim() || row.harnessName?.trim() || ''
+/** An account label that is only the account's id (nobody named it) is no name. */
+const named = (label: string | undefined, id: string | undefined) => label && label !== id ? label : ''
 
 /** Sessions whose deferral by a hold was already told (this process): once, not every tick. */
 const deferredTold = new Set<string>()
@@ -127,43 +130,57 @@ export async function runAutoSwitchTick(d: AutoSwitchDeps): Promise<AutoSwitchRe
         options: await d.options(row, current), budgets, episode, expired,
       })
       if (decision.kind === 'skip' || decision.kind === 'clear') continue
-      const from = (await d.label(harness, current)) ?? current ?? harness
+      const from = named(await d.label(harness, current), current)
+      const who = { session: sessionName(row), harness }
       const tz = d.timeZone ? { tz: d.timeZone } : {}
       if (decision.kind === 'none') {
         await episodeLedger.update(doc => { doc[conv] = decision.episode })
-        const w = autoSwitchWords({ kind: 'none', lang: d.lang, session: shortId(row), from, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
-        d.notify({ type: 'warning', code: decision.resetsAt !== undefined ? 'account.auto_none' : 'account.auto_none_manual', title: w.title, message: w.message, meta: { id: row.id, session: shortId(row), from, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })
+        const w = autoSwitchWords({ kind: 'none', lang: d.lang, ...who, from, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
+        d.notify({ type: 'warning', code: decision.resetsAt !== undefined ? 'account.auto_none' : 'account.auto_none_manual', title: w.title, message: w.message, meta: { id: row.id, ...who, from, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })
         out.none.push(row.id)
         continue
       }
       inFlight.add(row.id)
       try {
-        const r = await d.switchAccount({ id: row.id, accountId: decision.target.id, resendPending: true })
+        // A switch that throws is a failed switch like any other: counted, said once, never retried on the same target every tick.
+        const r: Awaited<ReturnType<AutoSwitchDeps['switchAccount']>> = await d.switchAccount({ id: row.id, accountId: decision.target.id, resendPending: true })
+          .catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }))
         if (!r.ok && r.deferred) {
           // Something live is using this session: ending it now would cut it off. Nothing was tried and nothing is recorded
           // against the target — the next tick decides again. Said once per session (a tick every minute must not be a notification every minute).
           out.deferred.push(row.id)
           if (!deferredTold.has(row.id)) {
             deferredTold.add(row.id)
-            const w = autoSwitchWords({ kind: 'deferred', lang: d.lang, session: shortId(row), from, ...tz })
-            d.notify({ type: 'info', code: 'account.auto_deferred', title: w.title, message: w.message, meta: { id: row.id, session: shortId(row), from } })
+            const w = autoSwitchWords({ kind: 'deferred', lang: d.lang, ...who, from, ...tz })
+            d.notify({ type: 'info', code: 'account.auto_deferred', title: w.title, message: w.message, meta: { id: row.id, ...who, from } })
           }
           continue
         }
         deferredTold.delete(row.id)
         if (!r.ok) {
           // The switch gave the session back on its own account (or refused): this target counts as tried, so the next tick picks another.
-          await episodeLedger.update(doc => { doc[conv] = { account: current ?? '', tried: [...new Set([...decision.episode.tried, decision.target.id])], handled: false, at: d.now() } })
+          // The raw text (paths, a CLI's stderr) stays in the ledger and the log; the notice gets a closed sentence.
+          const raw = r.message?.trim() || 'no reason was given'
+          await episodeLedger.update(doc => { doc[conv] = { account: current ?? '', tried: [...new Set([...decision.episode.tried, decision.target.id])], handled: false, at: d.now(), failure: { target: decision.target.id, message: raw, at: d.now() } } })
+          // Said, not swallowed: four real episodes (2026-11-07) failed with no notice, and their reason went with the rotated log.
+          console.error(`[auto-switch] ${row.id}: switch to ${decision.target.id} failed${r.ended ? ' (the session was ended)' : ''}: ${raw}`)
+          const to = named(decision.target.label, decision.target.id)
+          // Only a session that came back under a new id was given back on its old account; only `ended` is told to reopen.
+          const failure = { kind: switchFailureKind(r), outcome: (r.ended ? 'ended' : r.id ? 'kept' : 'unsaid') as SwitchOutcome }
+          const reason = switchFailureSentence(d.lang, failure.kind, failure.outcome)
+          const w = autoSwitchWords({ kind: 'failed', lang: d.lang, ...who, from, to, failure })
+          d.notify({ type: 'warning', code: 'account.auto_failed', title: w.title, message: w.message, meta: { id: r.id ?? row.id, ...who, from, to, reason, reasonKind: failure.kind, outcome: failure.outcome } })
+          if (row.taskId && w.comment) await d.comment(row.taskId, row.subtaskId, w.comment).catch(() => undefined)
           out.failed.push(row.id)
           continue
         }
         taken.add(decision.target.id) // the budgets were read once: no second session lands on this account this tick
         await episodeLedger.update(doc => { doc[conv] = decision.episode })
-        const to = decision.target.label || decision.target.id
-        const w = autoSwitchWords({ kind: 'move', lang: d.lang, session: shortId(row), from, to, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
-        d.notify({ type: 'info', code: 'account.auto_switched', title: w.title, message: w.message, meta: { id: r.id ?? row.id, session: shortId(row), from, to, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })
+        const to = named(decision.target.label, decision.target.id)
+        const w = autoSwitchWords({ kind: 'move', lang: d.lang, ...who, from, to, ...(decision.resetsAt !== undefined ? { resetsAt: decision.resetsAt } : {}), ...tz })
+        d.notify({ type: 'info', code: 'account.auto_switched', title: w.title, message: w.message, meta: { id: r.id ?? row.id, ...who, from, to, until: untilOf(decision.resetsAt, d.lang, d.timeZone) } })
         if (row.taskId && w.comment) await d.comment(row.taskId, row.subtaskId, w.comment).catch(() => undefined)
-        out.moved.push({ from, to, ...(r.id ? { id: r.id } : {}) })
+        out.moved.push({ from: from || current || harness, to: to || decision.target.id, ...(r.id ? { id: r.id } : {}) })
       } finally { inFlight.delete(row.id) }
     } catch (e) {
       console.error(`[auto-switch] ${row.id}: ${e instanceof Error ? e.message : String(e)}`)
@@ -264,7 +281,7 @@ export async function defaultAutoSwitchDeps(lang: 'en' | 'pt'): Promise<AutoSwit
       const host = await hostForFleet(lang)
       if (!host.switchSessionAccount) return { ok: false, message: 'unavailable' }
       const r = await host.switchSessionAccount(req)
-      return { ok: r.ok, ...(r.message ? { message: r.message } : {}), ...(r.id ? { id: r.id } : {}), ...((r as { deferred?: boolean }).deferred ? { deferred: true } : {}) }
+      return { ok: r.ok, ...(r.message ? { message: r.message } : {}), ...(r.id ? { id: r.id } : {}), ...((r as { code?: string }).code ? { code: (r as { code?: string }).code } : {}),...((r as { ended?: boolean }).ended ? { ended: true } : {}), ...((r as { deferred?: boolean }).deferred ? { deferred: true } : {}) }
     },
     label: async (harness, id) => (await import('./account-switch-io')).accountLabel(harness, id),
     notify: n => { void import('../sse').then(m => m.broadcastNotification({ type: n.type, code: n.code, title: n.title, message: n.message, meta: n.meta })).catch(() => undefined) },

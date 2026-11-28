@@ -16,6 +16,9 @@ const budget = (account: string, o: Partial<AccountBudget> = {}): AccountBudget 
   status: 'ok', updatedAt: NOW, stale: false, spawnable: true, ...o,
 }) as AccountBudget
 
+/** `acc_b` is the better target, `acc_c` the fallback. */
+const oneTarget = [budget('acc_a', { fiveHourPct: 100 }), budget('acc_b', { fiveHourPct: 5 }), budget('acc_c', { fiveHourPct: 50 })]
+
 /** A fleet of fake rows driven through the REAL switch implementation (`switchSessionAccountImpl`). */
 function world(o: { hold?: import('./retire-plan').HoldObservation; enabled?: boolean; limited?: (row: ManagedSession) => { resetsAt?: number; at?: number; pendingPrompt?: string } | null; limitRead?: (row: ManagedSession) => LimitRead; idle?: (row: ManagedSession) => number | undefined; corrupt?: boolean; sentPrompts?: string[]; budgets?: AccountBudget[]; refuseTarget?: string[]; rowsInit?: ManagedSession[]; harness?: string } = {}) {
   let n = 0
@@ -73,7 +76,7 @@ function world(o: { hold?: import('./retire-plan').HoldObservation; enabled?: bo
     },
     budgets: async () => o.budgets ?? [budget('acc_a', { fiveHourPct: 100 }), budget('acc_b'), budget('acc_c', { fiveHourPct: 60 })],
     options: async (_row, current) => accounts.filter(a => a.id !== current).map(a => ({ id: a.id, harness: 'claude', label: labels[a.id]! })) as never,
-    switchAccount: async req => { const r = await switchSessionAccountImpl(req, switchDeps()); return { ok: r.ok, message: r.message, ...(r.id ? { id: r.id } : {}), ...(r.deferred ? { deferred: true } : {}) } },
+    switchAccount: async req => { const r = await switchSessionAccountImpl(req, switchDeps()); return { ok: r.ok, message: r.message, ...(r.id ? { id: r.id } : {}), ...(r.code ? { code: r.code } : {}), ...(r.ended ? { ended: true } : {}), ...(r.deferred ? { deferred: true } : {}) } },
     label: async (_h, id) => (id ? labels[id] : undefined),
     notify: n => { notices.push({ code: n.code, meta: n.meta, message: n.message }) },
     comment: async (taskId, subtaskId, body) => { comments.push({ taskId, ...(subtaskId ? { subtaskId } : {}), body }) },
@@ -163,6 +166,127 @@ describe('runAutoSwitchTick — a limit-blocked row through the real switch', ()
     const r = await runAutoSwitchTick(w.deps)
     expect(r.moved.length).toBeLessThanOrEqual(MAX_MOVES_PER_TICK)
     expect(r.moved).toHaveLength(2) // acc_b and acc_c: one session each; the rest wait for the next tick (the budgets are read once)
+  })
+})
+
+describe('a failed switch is said, with its reason (CONTA.AUTO ressalvas)', () => {
+  test('a target that refuses to start: notice and board comment carry the reason, and the ledger keeps it', async () => {
+    const w = world({ refuseTarget: ['acc_b'], budgets: oneTarget })
+    await runAutoSwitchTick(w.deps)
+    expect(w.notices.map(n => n.code)).toEqual(['account.auto_failed'])
+    expect(w.notices[0]!.message).toContain('Conta B')
+    expect(w.notices[0]!.message).toContain('não conseguiu iniciar na outra conta')
+    // the notice's id is the row that carries the session now: the one given back on the old account
+    expect(w.notices[0]!.meta).toMatchObject({ id: w.live()[0]!.id, from: 'Conta A', to: 'Conta B', reasonKind: 'start_failed', outcome: 'kept' })
+    expect(String(w.notices[0]!.meta.reason)).toContain('não conseguiu iniciar na outra conta')
+    expect(w.comments).toHaveLength(1)
+    expect(w.comments[0]).toMatchObject({ taskId: 't-1', subtaskId: 's-1' })
+    expect(w.comments[0]!.body).toContain('não conseguiu iniciar na outra conta')
+    expect(w.episodes().conv1!.failure).toMatchObject({ target: 'acc_b', at: NOW })
+    expect(w.episodes().conv1!.failure!.message).toContain('terminou assim que começou')
+  })
+
+  test('the session could not be given back either: the notice says it was ENDED and points at Reopen', async () => {
+    const w = world({ refuseTarget: ['acc_b'], budgets: oneTarget })
+    w.deps.switchAccount = async () => ({ ok: false, ended: true, message: 'A sessão foi encerrada: ela não iniciou na outra conta nem pôde ser reaberta na conta de antes.' })
+    await runAutoSwitchTick(w.deps)
+    expect(w.notices.map(n => n.code)).toEqual(['account.auto_failed'])
+    expect(w.notices[0]!.message).toContain('use Reabrir')
+    expect(w.notices[0]!.meta.outcome).toBe('ended')
+  })
+
+  test('"reopen" is said only when the session was really closed: given back says it carries on, untouched says neither', async () => {
+    const back = world({ refuseTarget: ['acc_b'], budgets: oneTarget })
+    await runAutoSwitchTick(back.deps)
+    expect(back.notices[0]!.message).toContain('Ela continua na conta de antes')
+    expect(back.notices[0]!.message).not.toContain('Reabrir')
+    const refused = world({ budgets: oneTarget })
+    refused.deps.switchAccount = async () => ({ ok: false, code: 'account_signed_out', message: 'refused' })
+    await runAutoSwitchTick(refused.deps)
+    expect(refused.notices[0]!.message).toContain('O login da conta de destino')
+    expect(refused.notices[0]!.message).not.toMatch(/Reabrir|continua na conta de antes/)
+  })
+
+  test('nobody left to try: the failures and the one "no room" notice are said once, never again every tick', async () => {
+    for (const at of [undefined, NOW - 60_000]) {
+      const w = world({ refuseTarget: ['acc_b', 'acc_c'], budgets: oneTarget, limited: () => ({ resetsAt: NOW + 3 * 3_600_000, ...(at !== undefined ? { at } : {}) }) })
+      for (let i = 0; i < 8; i++) {
+        w.clock.now = NOW + i * 6 * 60_000
+        await runAutoSwitchTick(w.deps)
+      }
+      expect(w.notices.map(n => n.code)).toEqual(['account.auto_failed', 'account.auto_failed', 'account.auto_none'])
+      expect(w.comments).toHaveLength(2)
+    }
+  })
+
+  test('a switch that THROWS is reported once and its target counted as tried, not retried every tick', async () => {
+    const w = world({ budgets: [budget('acc_a', { fiveHourPct: 100 }), budget('acc_b', { fiveHourPct: 5 }), budget('acc_c', { fiveHourPct: 90 })] })
+    let calls = 0
+    w.deps.switchAccount = async () => { calls++; throw new Error('kaboom') }
+    await runAutoSwitchTick(w.deps)
+    await runAutoSwitchTick(w.deps)
+    expect(calls).toBe(1)
+    expect(w.notices.filter(n => n.code === 'account.auto_failed')).toHaveLength(1)
+    expect(w.notices[0]!.message).not.toContain('kaboom') // raw text never reaches the notice
+    expect(w.episodes().conv1!.failure!.message).toBe('kaboom') // it is kept where an operator looks
+  })
+})
+
+describe('no id, path or command ever reaches an auto-switch notice or board comment', () => {
+  const RAW = [
+    'codex: command not found',
+    "ENOENT: no such file or directory, open '/home/mithrandir/.agentistics/managed-sessions.json'",
+    'Error: spawn claude ENOENT',
+    'Please run /login · token expired for acc_9f8e7d',
+    'the session exited as soon as it started: claude: boom at /usr/lib/x.js:3',
+    'TypeError: cannot read properties of undefined (a1b2c3d4e5)',
+  ]
+  const CODES = ['accounts_disabled', 'unknown_account', 'account_unavailable', 'account_signed_out', 'account_retired', 'harness_unavailable', 'no_transcript', 'no_conversation', 'switch_unsupported', 'same_account', 'no_target', 'not_running_here']
+  const FORBIDDEN = /acc_|a1b2c3d4e5|f0e1d2c3b4|\/home|\/usr|\/login|ENOENT|command not found|spawn|TypeError|\.json|undefined|\{\w+\}/
+
+  for (const lang of ['pt', 'en'] as const) {
+    test(`unnamed session, unnamed accounts, every reason (${lang})`, async () => {
+      const failures = [...RAW.map(message => ({ message })), ...CODES.map(code => ({ message: `account "acc_9f8e7d" refused (${code})`, code }))]
+      for (const f of failures) {
+        for (const state of [{ ended: true }, { id: 'f0e1d2c3b4' }, {}]) {
+          const w = world({ rowsInit: [{ id: 'a1b2c3d4e5', harness: 'claude' as never, cwd: '/w', createdAt: '2026-10-30T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a', taskId: 't-1' }], budgets: oneTarget })
+          w.deps.lang = lang
+          w.deps.label = async () => undefined
+          w.deps.options = async () => [{ id: 'acc_b', harness: 'claude', label: 'acc_b' }] as never
+          w.deps.switchAccount = async () => ({ ok: false, ...f, ...state })
+          await runAutoSwitchTick(w.deps)
+          expect(w.notices.map(n => n.code)).toEqual(['account.auto_failed'])
+          for (const words of [w.notices[0]!.message, w.comments[0]!.body, String(w.notices[0]!.meta.reason)]) expect(words).not.toMatch(FORBIDDEN)
+          expect(w.notices[0]!.message).toContain(lang === 'pt' ? 'Uma sessão do Claude Code' : 'A Claude Code session')
+          expect(w.notices[0]!.meta.session).toBe('')
+        }
+      }
+    })
+
+    test(`the other notices of an unnamed session: moved, no room, deferred (${lang})`, async () => {
+      const row: ManagedSession = { id: 'a1b2c3d4e5', harness: 'claude' as never, cwd: '/w', createdAt: '2026-10-30T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a' }
+      const moved = world({ rowsInit: [{ ...row }] })
+      const none = world({ rowsInit: [{ ...row }], budgets: [budget('acc_a', { fiveHourPct: 100 })] })
+      // its own id per language: the deferral is told once per session for the life of the process
+      const held = world({ rowsInit: [{ ...row, id: `f0e1d2c3b4${lang}` }], hold: { state: 'held', since: NOW, sentence: { en: 'x', pt: 'x' } } })
+      for (const w of [moved, none, held]) {
+        w.deps.lang = lang
+        w.deps.label = async () => undefined
+        await runAutoSwitchTick(w.deps)
+        expect(w.notices).toHaveLength(1)
+        expect(w.notices[0]!.message).not.toMatch(FORBIDDEN)
+      }
+    })
+  }
+})
+
+describe('an account whose login the harness refused is never a move target', () => {
+  test('room in the budget, offered by the switch, but expired: nothing is resumed', async () => {
+    const w = world({ budgets: [budget('acc_a', { fiveHourPct: 100 }), budget('acc_b', { fiveHourPct: 5 }), budget('acc_c', { fiveHourPct: 90 })] })
+    w.deps.expired = async () => new Set(['acc_b'])
+    await runAutoSwitchTick(w.deps)
+    expect(w.resumed).toEqual([])
+    expect(w.notices.map(n => n.code)).toEqual(['account.auto_none'])
   })
 })
 
