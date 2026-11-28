@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando uma sessão bate o limite da conta no meio da conversa, ela agora troca sozinha para outra conta liberada para agentes (dentro da agenda ou com a agenda sobrescrita) que ainda tem folga nas 5 horas, e continua de onde parou. Antes ela quase sempre dizia que nenhuma conta tinha vaga.',
+        en: 'When a session hits its account limit mid-conversation, it now moves by itself to another account that is open to agents (inside its schedule, or with the schedule overridden) and still has room in its 5-hour window, and carries on where it stopped. Before, it almost always said no account had room.',
+      },
+    ],
+  },
   '2.230.7': {
     features: [],
     fixes: [
