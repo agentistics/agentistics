@@ -3793,7 +3793,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 )}
 
                 {!answeringNow && (
-                  <EngineSurfaceButtons placement="composer" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
+                  <EngineSurfaceButtons placement="composer" only="inactive" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
                 )}
                 {!answeringNow && <ComposerTaskButton options={composerTask.options} onChange={composerTask.setOptions} disabled={!canPrompt || sending} pt={pt} />}
 
@@ -3918,6 +3918,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     is the same rule minus the draft — so the stop button stayed up while somebody
                     typed, and the send button they were typing toward never appeared. `stopShown`
                     was sitting one screen up, correct and unused. */}
+                {/* AN ACTIVE COMPOSER SURFACE ENDS RIGHT BESIDE SEND/STOP (owner, 2026-11-27): its button
+                    is the control that ends what is running, so while active it leaves the tool row
+                    (`only="inactive"` there) and sits immediately before the send slot — the next tab
+                    stop before Send. Idle and parked faces stay in the tool row. */}
+                {!answeringNow && (
+                  <EngineSurfaceButtons placement="composer" only="active" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
+                )}
                 {stopShown ? (
                   <button
                     onClick={() => void stopNow()}

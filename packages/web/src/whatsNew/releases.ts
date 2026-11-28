@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Campo de mensagem: enquanto uma ação está ativa, o botão que a encerra fica logo à esquerda do Enviar/Parar, em vez de no canto oposto.',
+        en: 'Message field: while an action is active, the button that ends it now sits right to the left of Send/Stop, instead of at the opposite corner.',
+      },
+    ],
+  },
   '2.230.7': {
     features: [],
     fixes: [

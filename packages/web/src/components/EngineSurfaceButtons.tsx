@@ -10,12 +10,19 @@ export function surfaceGlyph(icon: SurfaceIcon | undefined): LucideIcon | null {
 }
 
 /**
+ * `only` splits one placement between two spots: a composer draws its IDLE and parked faces in the
+ * tool row (`'inactive'`) and the ACTIVE one beside Send/Stop (`'active'`), the control that ends it
+ * next to the control that sends — so one surface is never drawn twice. Absent = every face here.
+ */
+export type SurfaceFaceFilter = 'active' | 'inactive'
+
+/**
  * One generic button per surface the engine announced for `placement` — nothing when there are none
  * (a community build, or every surface behind an experimental flag that is off). A click asks the
  * app-level `EngineSurfaceHost` to open the surface; the buttons own no overlay of their own, so a
  * surface outlives the screen (and the button) it was opened from.
  */
-export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, slotId }: { placement: SurfacePlacement; sessionId: string | null; sessionKind?: 'nay' | 'session'; lang: 'pt' | 'en'; slotId?: string }) {
+export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, slotId, only }: { placement: SurfacePlacement; sessionId: string | null; sessionKind?: 'nay' | 'session'; lang: 'pt' | 'en'; slotId?: string; only?: SurfaceFaceFilter }) {
   const surfaces = useEngineSurfaces(placement)
   const mobile = useIsMobile()
   const mounted = useMountedEngineSurfaces()
@@ -31,6 +38,7 @@ export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, 
         const mine = placement === 'composer' && !!entry && entry.sessionId === sessionId
         const active = mine && entry?.parked === false
         const parked = mine && entry?.parked === true
+        if (only === 'active' ? !active : only === 'inactive' ? active : false) return null
         const name = active ? (s.activeLabel ?? s.label)[lang] : s.label[lang]
         const size = placement === 'composer' ? 15 : 14
         const iconName: SurfaceIcon | undefined = active ? (s.activeIcon ?? s.icon) : s.icon
