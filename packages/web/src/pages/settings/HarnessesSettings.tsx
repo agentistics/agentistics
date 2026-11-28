@@ -7,6 +7,7 @@ import { useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHar
 import { useOpenAccountSignIn } from '../../lib/accountSignIn'
 import { SectionHeader, dialogButtonStyle } from './primitives'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
+import { HarnessUninstallDialog, UninstallButton } from '../../components/HarnessUninstallDialog'
 import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
 import { Pill } from '../../components/Pill'
@@ -56,7 +57,7 @@ function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; act
       display: 'flex', flexDirection: 'column', gap: 0,
     }}>
       {/* Row: icon + name + badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: hasGuidance ? 10 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: hasGuidance ? 10 : 0 }}>
         <div style={{
           width: 32, height: 32, borderRadius: 8, flexShrink: 0,
           background: 'var(--bg-card)', border: '1px solid var(--border)',
@@ -64,7 +65,7 @@ function HarnessCard({ h, pt, action }: { h: HarnessChatStatus; pt: boolean; act
         }}>
           <Cpu size={14} color={h.ready ? 'var(--accent-green)' : 'var(--text-tertiary)'} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: '1 1 140px', minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{h.label}</span>
             <HarnessStatusBadge h={h} pt={pt} />
@@ -120,6 +121,7 @@ export default function HarnessesSettings() {
   const { harnesses, loading, reload } = useChatHarnesses()
   const isMobile = useIsMobile()
   const [target, setTarget] = useState<HarnessChatStatus | null>(null)
+  const [removing, setRemoving] = useState<HarnessChatStatus | null>(null)
   const signingIn: string | null = null
   const [notice, setNotice] = useState('')
   const openSignIn = useOpenAccountSignIn()
@@ -148,13 +150,20 @@ export default function HarnessesSettings() {
             {harnesses.map(h => {
               const needsSignIn = h.installed && !h.authReady
               const actionable = !h.ready || h.updateAvailable === true
-              const action = actionable ? (
+              const removable = h.installed && h.canInstall === true
+              const primary = actionable ? (
                 <button type="button" disabled={signingIn === h.id} onClick={() => {
                   if (needsSignIn) { void signIn(h); return }
                   setTarget(h)
                 }} style={{ ...dialogButtonStyle('secondary', isMobile), width: undefined, flexShrink: 0, color: 'var(--text-primary)', background: 'var(--bg-card)' }}>
                   {needsSignIn ? (pt ? 'Entrar' : 'Sign in') : h.installed ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')}
                 </button>
+              ) : null
+              const action = primary || removable ? (
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {primary}
+                  {removable && <UninstallButton pt={pt} label={h.label} onClick={() => setRemoving(h)} />}
+                </div>
               ) : undefined
               return <HarnessCard key={h.id} h={h} pt={pt} action={action} />
             })}
@@ -172,6 +181,7 @@ export default function HarnessesSettings() {
       )}
       {notice && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}>{notice}</div>}
       <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} />
+      <HarnessUninstallDialog target={removing} pt={pt} onClose={() => setRemoving(null)} onDone={() => reload()} />
     </div>
   )
 }

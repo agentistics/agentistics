@@ -150,7 +150,21 @@ export async function installHarness(
     if (response.status === 409) return { ok: false, code: 'busy' }
     return { ok: false, code: 'failed' }
   }
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  const end = await readJobStream(response.body, onProgress)
+  if (end) return end
+  // The stream ended with neither `done` nor `error`: the CONNECTION dropped, not the installer —
+  // which may well still be running. Saying "check your internet" here blamed the wrong thing.
+  return {
+    ok: false, code: 'failed',
+    error: (opts.lang ?? 'pt') === 'pt'
+      ? 'A conexão com o agentistics caiu durante a instalação, que pode ter continuado. Feche, aguarde um pouco e confira se o assistente aparece; se não, tente de novo (detalhes em ~/.agentistics/harness-install.log).'
+      : 'The connection to agentistics dropped during the install, which may have kept going. Close, wait a moment and check whether the assistant shows up; if not, try again (details in ~/.agentistics/harness-install.log).',
+  }
+}
+
+/** Reads a harness job's SSE stream to its `done`/`error`; `null` when it ended with neither. */
+async function readJobStream(stream: NonNullable<Response['body']>, onProgress?: (line: string) => void, onDoneMessage?: (message: string) => void): Promise<InstallResult | null> {
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
   while (true) {
     const next = await reader.read().catch(() => ({ done: true, value: undefined }))
@@ -163,19 +177,53 @@ export async function installHarness(
       if (!line) continue
       let event: { type: string; message?: string; version?: string }
       try { event = JSON.parse(line.slice(6)) } catch { continue }
+      if (event.type === 'done' && event.message) onDoneMessage?.(event.message)
       if (event.type === 'done') return { ok: true, ...(event.version ? { version: event.version } : {}) }
       if (event.type === 'error') return { ok: false, code: 'failed', ...(event.message ? { error: event.message } : {}) }
       if (event.message) onProgress?.(event.message)
     }
   }
-  // The stream ended with neither `done` nor `error`: the CONNECTION dropped, not the installer —
-  // which may well still be running. Saying "check your internet" here blamed the wrong thing.
-  return {
-    ok: false, code: 'failed',
-    error: (opts.lang ?? 'pt') === 'pt'
-      ? 'A conexão com o agentistics caiu durante a instalação, que pode ter continuado. Feche, aguarde um pouco e confira se o assistente aparece; se não, tente de novo (detalhes em ~/.agentistics/harness-install.log).'
-      : 'The connection to agentistics dropped during the install, which may have kept going. Close, wait a moment and check whether the assistant shows up; if not, try again (details in ~/.agentistics/harness-install.log).',
+  return null
+}
+
+/** What removing a harness CLI would do (GET), or why it will not be done. */
+export interface UninstallPreview {
+  reason: 'ok' | 'manual' | 'not-installed' | 'live-sessions' | 'running-inside' | 'live-unknown'
+  removes: string[]
+  keeps: string[]
+  message?: string
+}
+
+export async function fetchUninstallPreview(id: string, lang: 'pt' | 'en'): Promise<UninstallPreview | null> {
+  try {
+    const response = await fetch(`/api/harnesses/${encodeURIComponent(id)}/uninstall?lang=${lang}`)
+    return response.ok ? await response.json() as UninstallPreview : null
+  } catch { return null }
+}
+
+/** Removes the CLI on the server. Never call this without the person having confirmed. */
+export async function uninstallHarness(
+  id: string, onProgress?: (line: string) => void, opts: { lang?: 'pt' | 'en' } = {},
+): Promise<InstallResult & { message?: string }> {
+  const lang = opts.lang ?? 'pt'
+  const dropped = lang === 'pt'
+    ? 'A conexão com o agentistics caiu durante a desinstalação, que pode ter continuado. Feche, aguarde um pouco e confira se o assistente ainda aparece.'
+    : 'The connection to agentistics dropped during the uninstall, which may have kept going. Close, wait a moment and check whether the assistant still shows up.'
+  let response: Response
+  try {
+    response = await fetch(`/api/harnesses/${encodeURIComponent(id)}/uninstall`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed: true, lang }),
+    })
+  } catch { return { ok: false, code: 'failed' } }
+  if (!response.ok || !response.body) {
+    const detail = await response.json().catch(() => ({})) as { message?: string }
+    return { ok: false, code: 'failed', ...(detail.message ? { error: detail.message } : {}) }
   }
+  let said = ''
+  const end = await readJobStream(response.body, onProgress, message => { said = message })
+  if (!end) return { ok: false, code: 'failed', error: dropped }
+  return end.ok && said ? { ...end, message: said } : end
 }
 
 /** One harness's current status (fresh GET), or null when it is not listed (e.g. the native one) or the read fails. */

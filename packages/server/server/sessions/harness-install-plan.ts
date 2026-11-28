@@ -53,13 +53,15 @@ export function installSearchPath(path: string | undefined): string {
 /** What went wrong, short and bounded, for the dialog and the log. Never empty. */
 export function installFailureDetail(
   outcome: { code: number | null; spawnError?: string; stderrTail?: string[] }, lang: 'pt' | 'en',
+  what: 'installer' | 'uninstaller' = 'installer',
 ): string {
   const pt = lang === 'pt'
+  const name = what === 'installer' ? (pt ? 'instalador' : 'installer') : (pt ? 'desinstalador' : 'uninstaller')
   if (outcome.spawnError) {
-    return redactSecrets(`${pt ? 'O instalador não iniciou' : 'The installer did not start'}: ${cleanInstallLine(outcome.spawnError)}`)
+    return redactSecrets(`${pt ? `O ${name} não iniciou` : `The ${name} did not start`}: ${cleanInstallLine(outcome.spawnError)}`)
   }
   const code = outcome.code === null ? '?' : String(outcome.code)
-  const head = pt ? `O instalador saiu com código ${code}` : `The installer exited with code ${code}`
+  const head = pt ? `O ${name} saiu com código ${code}` : `The ${name} exited with code ${code}`
   const tail = (outcome.stderrTail ?? []).map(cleanInstallLine).filter(Boolean).slice(-3).join(' · ')
   const body = tail || (pt ? 'sem nenhuma mensagem' : 'without any message')
   return redactSecrets(`${head} (${body.slice(0, 300)}).`)

@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'PRÓXIMA': {
+    features: [
+      {
+        pt: 'Agora dá para desinstalar um assistente que você não usa mais: o botão "Desinstalar" fica em Ajustes, junto dos assistentes, e na janela de nova sessão. Antes de remover, ele mostra o que sai e o que fica.',
+        en: 'You can now uninstall an assistant you no longer use: the "Uninstall" button is in Settings, next to the assistants, and in the new-session window. Before removing anything it shows what goes and what stays.',
+      },
+      {
+        pt: 'Suas sessões, configurações, login e o histórico de métricas são mantidos. Depois, o assistente volta a aparecer apenas como "Instalar".',
+        en: 'Your sessions, settings, sign-in and metrics history are kept. Afterwards the assistant only shows up as "Install" again.',
+      },
+    ],
+    fixes: [],
+  },
   '2.230.7': {
     features: [],
     fixes: [

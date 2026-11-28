@@ -128,17 +128,24 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignIn }: 
       {/* The installer's progress is for while it RUNS (or to explain a failure): kept after a success it left
           "Checking the version…" standing beside "Done" (QA F4). */}
       {lines.length > 0 && phase !== 'success' && phase !== 'login-offer' && (
-        <div
-          role="log" aria-live="polite" data-testid="harness-install-progress"
-          style={{
-            fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)',
-            background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: 8,
-            maxHeight: 150, overflow: 'hidden', overflowWrap: 'anywhere',
-          }}
-        >
-          {lines.map((l, i) => <div key={`${i}-${l}`}>{l}</div>)}
-        </div>
+        <HarnessJobLog lines={lines} testId="harness-install-progress" />
       )}
     </ConfirmModal>
+  )
+}
+
+/** The lines a harness job (install, update, uninstall) writes while it runs. */
+export function HarnessJobLog({ lines, testId }: { lines: string[]; testId: string }) {
+  return (
+    <div
+      role="log" aria-live="polite" data-testid={testId}
+      style={{
+        fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)',
+        background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, padding: 8,
+        maxHeight: 150, overflow: 'hidden', overflowWrap: 'anywhere',
+      }}
+    >
+      {lines.map((l, i) => <div key={`${i}-${l}`}>{l}</div>)}
+    </div>
   )
 }

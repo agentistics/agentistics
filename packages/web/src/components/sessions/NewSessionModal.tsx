@@ -37,6 +37,7 @@ import { PillPicker } from './PillPicker'
 import { CANONICAL_MODE_TEXT, type CanonicalMode } from '@agentistics/core'
 import { HarnessPicker, withMissingHarnesses } from './HarnessPicker'
 import { HarnessInstallDialog } from '../HarnessInstallDialog'
+import { HarnessUninstallDialog, UninstallButton } from '../HarnessUninstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
 import { ProjectPicker } from './ProjectPicker'
@@ -154,7 +155,7 @@ export function NewSessionModal({
    * provider is its own answer on the first step; see `lib/nativeSession.ts`.
    */
   const { nativeRuntime } = useEngineCaps()
-  const { harnesses: chatHarnesses } = useChatHarnesses(true)
+  const { harnesses: chatHarnesses, reload: reloadChatHarnesses } = useChatHarnesses(true)
   const [nativeProvider, setNativeProvider] = useState(restored?.nativeProvider ?? '')
   const [providerOpen, setProviderOpen] = useState(false)
   const nativeOptions = useNativeProviders(nativeRuntime === true, nativeProvider, lang)
@@ -172,6 +173,7 @@ export function NewSessionModal({
   const [dirty, setDirty] = useState(restored?.dirty ?? false)
   // A harness missing on this machine is listed greyed with Install; this is that flow's target.
   const [installing, setInstalling] = useState<string | null>(null)
+  const [uninstalling, setUninstalling] = useState<{ id: string; label: string } | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   // Prefer a PRESET's own harness when this machine can actually start it; otherwise pre-select the
   // only assistant there is — a one-item picker is a question with one answer. Runs whenever the
@@ -901,7 +903,18 @@ export function NewSessionModal({
               planLimits={planSnap.limits}
               now={planSnap.now}
             />
+            {harness && chatHarnesses.some(h => h.id === harness.id && h.installed && h.canInstall) && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <UninstallButton pt={pt} label={chatHarnesses.find(h => h.id === harness.id)?.label ?? harness.label} named onClick={() => setUninstalling({ id: harness.id, label: chatHarnesses.find(h => h.id === harness.id)?.label ?? harness.label })} />
+              </div>
+            )}
           </Field>
+          <HarnessUninstallDialog
+            target={uninstalling}
+            pt={pt}
+            onClose={() => setUninstalling(null)}
+            onDone={() => { setHarness(null); setModel(''); reloadChatHarnesses(); retry() }}
+          />
           <HarnessInstallDialog
             target={installing ? { id: installing, label: chatHarnesses.find(h => h.id === installing)?.label ?? harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
             pt={pt}

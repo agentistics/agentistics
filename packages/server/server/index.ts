@@ -4404,6 +4404,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return handleHarnessInstallRoute(req, decodeURIComponent(harnessInstall[1]!), harnessInstall[2] as 'install' | 'update')
     }
 
+    const harnessUninstall = url.pathname.match(/^\/api\/harnesses\/([^/]+)\/uninstall$/)
+    if (harnessUninstall && (req.method === 'GET' || req.method === 'POST')) {
+      const { handleHarnessUninstallRoute } = await import('./sessions/harness-install')
+      return handleHarnessUninstallRoute(req, decodeURIComponent(harnessUninstall[1]!))
+    }
+
     if (url.pathname === '/api/chat-tty' && req.method === 'POST') {
       try {
         const body = await req.json() as { message: string; history?: ChatMessage[]; model?: string; sessionId?: string | null; thinkingBudget?: number; attachments?: ChatAttachment[]; harness?: string }
