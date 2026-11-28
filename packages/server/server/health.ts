@@ -7,6 +7,7 @@ import { PROJECTS_DIR, STATS_CACHE_FILE } from './config'
 import { safeReadDir, safeStat, safeReadJson } from './utils'
 import { getEnabledAdapters } from './adapters/types'
 import { getOpencodeReadIssue } from './adapters/opencode-status'
+import { getHermesReadIssue } from './adapters/hermes-status'
 import { opencodeV2Status, type OpencodeV2Status } from './sessions/opencode-v2-api'
 import type { JournalStatus, JournalDisabledReason } from './journal/types'
 
@@ -134,6 +135,18 @@ export function analyzeJournalStatus(status: JournalStatus | null, issues: Healt
       ].join(' '),
     })
   }
+}
+
+/** The Hermes reader's last refusal sentence (adapters/hermes-status.ts) as a health issue. */
+export function analyzeHermesStatus(description: string | null, issues: HealthIssue[]): void {
+  if (!description) return
+  issues.push({
+    id: 'hermes-unreadable',
+    severity: 'warning',
+    title: 'Hermes sessions cannot be read',
+    description,
+    guide: 'Hermes sessions, tokens and cost are missing from the dashboard until this is fixed.',
+  })
 }
 
 /** The OpenCode reader's last failure sentence (adapters/opencode-status.ts) as a health issue. */
@@ -377,6 +390,7 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
 
   // 6b. OpenCode: a store or service the reader cannot read is reported, never shown as "0 sessions".
   if (enabledIds.has('opencode')) analyzeOpencodeStatus(getOpencodeReadIssue(), issues)
+  if (enabledIds.has('hermes')) analyzeHermesStatus(getHermesReadIssue(), issues)
 
   // 7. What the engine contributes, when one is loaded.
   await appendEngineHealth(issues)

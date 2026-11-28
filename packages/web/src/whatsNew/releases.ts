@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.232.0': {
+    features: [
+      {
+        pt: 'O Hermes agora aparece nas telas de métricas: as sessões dele entram em Uso, Comparar harnesses, Custos e na sequência de dias, com tokens, custo, modelo, ferramentas e tempo ativo.',
+        en: 'Hermes now shows up in the metrics screens: its sessions count in Usage, Compare harnesses, Costs and your day streak, with tokens, cost, model, tools and active time.',
+      },
+      {
+        pt: 'Quando o próprio Hermes informa o custo, vale o número dele e a tela diz de onde veio. Quando não informa, o custo é estimado pelo preço do modelo, e um modelo sem preço aparece como desconhecido, nunca como zero.',
+        en: 'When Hermes states a cost, its figure is used and the screen says where it came from. When it does not, the cost is estimated from the model price, and a model with no price shows as unknown, never as zero.',
+      },
+      {
+        pt: 'No Hermes, um modelo só custa zero quando o registro nomeia um provedor local (por exemplo, LM Studio). Ollama Cloud, um endpoint próprio (custom), mesmo em localhost, ou um provedor que não dá para confirmar aparecem sem preço.',
+        en: 'In Hermes, a model costs zero only when the record names a local provider (LM Studio, for example). Ollama Cloud, a custom endpoint, even on localhost, or a provider that cannot be confirmed show with no price.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Melhorias internas no motor do app, com mais estabilidade e leitura mais precisa das sessões do Hermes.',
+        en: 'Internal improvements to the app engine, with more stability and a more accurate reading of Hermes sessions.',
+      },
+    ],
+  },
   '2.231.1': {
     features: [],
     fixes: [

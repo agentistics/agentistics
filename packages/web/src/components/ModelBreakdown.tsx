@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import type { ModelUsage } from '@agentistics/core'
-import { fmt, formatModel, calcCost, isUnpricedModel, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, getModelColor, fmtCost, usageTokenTotal } from '@agentistics/core'
+import { fmt, formatModel, calcCost, hasModelCost, unpricedTokens, UNPRICED_MODEL_LABEL, UNPRICED_TOTAL_MARKER, getModelColor, fmtCost, usageTokenTotal } from '@agentistics/core'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { resolveProvider, providerOrder } from '@agentistics/core'
 import { MetricNote } from './MetricNote'
@@ -283,13 +283,13 @@ export function ModelBreakdown({ modelUsage, note, currency = 'USD', brlRate = 1
             {/* Cost */}
             <div style={{ textAlign: 'right' }}>
               <span style={{
-                fontSize: isMobile && isUnpricedModel(modelId) ? 10.5 : 12, fontWeight: 700,
+                fontSize: isMobile && !hasModelCost(usage, modelId) ? 10.5 : 12, fontWeight: 700,
                 color: 'var(--anthropic-orange)',
                 background: 'var(--anthropic-orange-dim)',
-                padding: isMobile && isUnpricedModel(modelId) ? '2px 4px' : '2px 7px', borderRadius: 5,
+                padding: isMobile && !hasModelCost(usage, modelId) ? '2px 4px' : '2px 7px', borderRadius: 5,
                 whiteSpace: 'nowrap',
               }}>
-                {isUnpricedModel(modelId) ? UNPRICED_MODEL_LABEL[lang] : fmtCost(costUSD, currency, brlRate)}
+                {!hasModelCost(usage, modelId) ? UNPRICED_MODEL_LABEL[lang] : fmtCost(costUSD, currency, brlRate)}
               </span>
             </div>
           </div>

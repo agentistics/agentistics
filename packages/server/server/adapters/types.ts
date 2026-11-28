@@ -18,12 +18,31 @@ export function harnessEnabled(id: HarnessId): boolean {
   return process.env[`AGENTISTICS_HARNESS_${id.toUpperCase()}`] !== '0'
 }
 
+/**
+ * The Hermes adapter is built HERE because `hermes.ts` carries no host capability (the delivery guard's
+ * shrink-only ceilings): the paths, the existence probe and the memo it is handed live in modules that do.
+ */
+let _hermes: Promise<HarnessAdapter> | null = null
+export function loadHermesAdapter(): Promise<HarnessAdapter> {
+  _hermes ??= Promise.all([import('./hermes'), import('../config'), import('./file-memo'), import('./opencode-v2')])
+    .then(([{ createHermesAdapter }, { HERMES_DIR, HERMES_DB_PATH }, { createFileMemo, registerMemo, versionOf }, { hasOpencodeDb }]) =>
+      createHermesAdapter({
+        dir: HERMES_DIR,
+        dbPath: HERMES_DB_PATH,
+        enabled: () => harnessEnabled('hermes'),
+        exists: hasOpencodeDb, // a plain `existsSync` of the given path
+        versionOf,
+        memo: registerMemo(createFileMemo<SessionMeta[]>(4)),
+      }))
+  return _hermes
+}
+
 /** Lazily-resolved adapter list to avoid circular import issues (claude/codex import from types). */
 let _adapters: HarnessAdapter[] | null = null
 
 async function getAllAdapters(): Promise<HarnessAdapter[]> {
   if (_adapters) return _adapters
-  const [{ claudeAdapter }, { codexAdapter }, { geminiAdapter }, { copilotAdapter }, { kimiAdapter }, { antigravityAdapter }, { opencodeAdapter }] = await Promise.all([
+  const [{ claudeAdapter }, { codexAdapter }, { geminiAdapter }, { copilotAdapter }, { kimiAdapter }, { antigravityAdapter }, { opencodeAdapter }, hermesAdapter] = await Promise.all([
     import('./claude'),
     import('./codex'),
     import('./gemini'),
@@ -31,8 +50,9 @@ async function getAllAdapters(): Promise<HarnessAdapter[]> {
     import('./kimi'),
     import('./antigravity'),
     import('./opencode'),
+    loadHermesAdapter(),
   ])
-  _adapters = [claudeAdapter, codexAdapter, geminiAdapter, copilotAdapter, kimiAdapter, antigravityAdapter, opencodeAdapter]
+  _adapters = [claudeAdapter, codexAdapter, geminiAdapter, copilotAdapter, kimiAdapter, antigravityAdapter, opencodeAdapter, hermesAdapter]
   return _adapters
 }
 

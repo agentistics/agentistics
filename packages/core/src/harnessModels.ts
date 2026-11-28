@@ -80,6 +80,9 @@ export const HARNESS_MODELS: Record<HarnessId, ModelOption[]> = {
   // No SPAWN_SPECS entry either (CLAUDE.md step 4, skipped by scope) — this table exists to label
   // SPAWN_SPECS[h].modelSuggestions, and opencode has none of those to label.
   opencode: [],
+  // `hermes acp` states each session's own `provider:model` list in `session/new` (it depends on the
+  // providers the person signed in to) and there is no listing subcommand; the one recorded frame is
+  // sanitized (`provider:model-a`). Nothing to label; prices go through `hermesModelId`.
   hermes: [],
 }
 
