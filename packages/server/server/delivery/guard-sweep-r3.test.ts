@@ -1,5 +1,6 @@
 /** QA S2b r2 (Opus): adversarial probes on the r2 sweep — harness copied from guard-sweep-r2.test.ts. A (fail) is a finding. */
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, setDefaultTimeout } from 'bun:test'
+import { ownedTests, REAL_STORE_TIMEOUT_MS } from './real-store-lifecycle.testing'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,7 +30,9 @@ const subtask = (id: string, extra: Record<string, unknown> = {}) => ({ id, task
 
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'qa-s2b-')) })
-afterEach(() => rmSync(root, { recursive: true, force: true }))
+const { test, settled } = ownedTests()
+setDefaultTimeout(REAL_STORE_TIMEOUT_MS)
+afterEach(async () => { await settled(); rmSync(root, { recursive: true, force: true }) })
 
 async function world(rule: 'off' | 'shadow' | 'on', subs: Array<[string, Record<string, unknown>?]> = [['p1']], migrated = true) {
   const clock = { now: T }

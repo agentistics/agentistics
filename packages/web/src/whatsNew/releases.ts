@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.230.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Se a troca automática de conta falhar, agora aparece um aviso dizendo o motivo em linguagem simples, sem códigos nem caminhos de arquivo, e só pede para reabrir a sessão quando ela chegou a ser encerrada. A mesma conta não é tentada de novo no mesmo episódio. Antes a falha era silenciosa.',
+        en: 'If the automatic account switch fails, a notice now says why in plain words, with no codes or file paths, and only asks you to reopen the session when it was actually closed. The same account is not tried again in the same episode. Before, the failure was silent.',
+      },
+    ],
+  },
   '2.230.8': {
     features: [],
     fixes: [

@@ -249,7 +249,11 @@ describe.skipIf(skipReason !== null)(`RUN.ISOLAMENTO-REDE: a real network block$
   }, 120_000)
 
   // r4 N1: the WSL interop channel runs a Windows executable OUTSIDE every namespace (curl.exe reached the real server, wsl.exe reached the host's Linux root)
-  const interop = existsSync('/proc/sys/fs/binfmt_misc/WSLInterop') || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop-late')
+  const interopRegistered = existsSync('/proc/sys/fs/binfmt_misc/WSLInterop') || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop-late')
+  // Registered is not the same as working: when the Windows side of interop is down (vsock accept timeouts) every .exe hangs, the
+  // control below cannot pass and the test would fail for a machine fault. Probe it once, outside any run, and skip when it is broken.
+  const interop = interopRegistered && existsSync('/mnt/c/Windows/System32/cmd.exe') &&
+    Bun.spawnSync(['/mnt/c/Windows/System32/cmd.exe', '/c', 'echo', 'PROBE'], { stdout: 'pipe', stderr: 'ignore', timeout: 8_000 }).stdout.toString().includes('PROBE')
   test.skipIf(!interop)('N1: cmd.exe, curl.exe and wsl.exe cannot be run from inside; control: they run without the namespace', async () => {
     const wsl = Bun.spawnSync(['sh', '-c', 'command -v wsl.exe'], { stdout: 'pipe' }).stdout.toString().trim()
     const script = `echo WSL_INTEROP=[$WSL_INTEROP]; for e in /mnt/c/Windows/System32/cmd.exe /mnt/c/Windows/System32/curl.exe ${wsl || '/mnt/c/Windows/System32/wsl.exe'}; do case $e in *wsl.exe) a="-e echo ESCAPED";; *cmd.exe) a="/c echo ESCAPED";; *) a="--version";; esac; out=$(timeout 8 $e $a 2>/dev/null); echo "$(basename $e) rc=$? out=[$(echo $out | head -c 40)]"; done`
